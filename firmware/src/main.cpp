@@ -1,8 +1,9 @@
-// includes
 #include <HardwareSerial.h>
-// #include <SoftwareSerial.h>
 #include <ODriveArduino.h>
-// Printing with stream operator helper functions
+#include <MPU6050_light.h>
+#include <Wire.h>
+
+// printing with stream operator helper functions
 template <class T>
 inline Print &operator<<(Print &obj, T arg)
 {
@@ -16,43 +17,16 @@ inline Print &operator<<(Print &obj, float arg)
   return obj;
 }
 
-////////////////////////////////
-// Set up serial pins to the ODrive
-////////////////////////////////
-
-// Below are some sample configurations.
-// You can comment out the default Teensy one and uncomment the one you wish to use.
-// You can of course use something different if you like
-// Don't forget to also connect ODrive GND to Arduino GND.
-
-// Teensy 3 and 4 (all versions) - Serial1
-// pin 0: RX - connect to ODrive TX
-// pin 1: TX - connect to ODrive RX
-// See https://www.pjrc.com/teensy/td_uart.html for other options on Teensy
 HardwareSerial &odrive_serial = Serial1;
+// HardwareSerial &console = Serial;
 
-// Arduino Mega or Due - Serial1
-// pin 19: RX - connect to ODrive TX
-// pin 18: TX - connect to ODrive RX
-// See https://www.arduino.cc/reference/en/language/functions/communication/serial/ for other options
-// HardwareSerial& odrive_serial = Serial1;
-
-// Arduino without spare serial ports (such as Arduino UNO) have to use software serial.
-// Note that this is implemented poorly and can lead to wrong data sent or read.
-// pin 8: RX - connect to ODrive TX
-// pin 9: TX - connect to ODrive RX
-// SoftwareSerial odrive_serial(8, 9);
-
-// ODrive object
 ODriveArduino odrive(odrive_serial);
+MPU6050 mpu(Wire);
 
 const int PIN_DEBUG_LED = LED_BUILTIN;
 
 void setup()
 {
-  // ODrive uses 115200 baud
-  odrive_serial.begin(115200);
-
   // Serial to PC
   Serial.begin(115200);
 
@@ -71,8 +45,32 @@ void setup()
   // keep the debug led lit
   digitalWrite(PIN_DEBUG_LED, HIGH);
 
-  Serial.println("ODriveArduino");
-  Serial.println("Setting parameters...");
+  Serial.print("Searching for MPU6050..");
+
+  Wire.begin();
+
+  if (mpu.begin() != 0)
+  {
+    Serial.println(" failed!");
+
+    while (1)
+    {
+      digitalWrite(PIN_DEBUG_LED, HIGH);
+      delay(100);
+      digitalWrite(PIN_DEBUG_LED, LOW);
+      delay(100);
+    }
+  }
+  Serial.println(" done!");
+
+  Serial.print(F("Calculating IMU offsets, keep still.. "));
+  delay(1000);
+  mpu.calcOffsets();
+  Serial.println(" done!");
+
+  Serial.print("Setting up odrive..");
+
+  odrive_serial.begin(115200);
 
   // In this example we set the same parameters to both motors.
   // You can of course set them different if you want.
@@ -84,11 +82,13 @@ void setup()
   //   // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
   // }
 
-  Serial.println("Ready!");
-  // Serial.println("Send the character '0' or '1' to calibrate respective motor (you must do this before you can command movement)");
-  Serial.println("Send the character 's' to exectue test move");
+  Serial.println(" done!");
+  Serial.println();
+
+  Serial.println("Send the character 'a' to let IMU control motor speed");
   Serial.println("Send the character 'b' to read bus voltage");
   Serial.println("Send the character 'p' to read motor positions in a 10s loop");
+  Serial.println("Send the character 't' to exectute test move");
 }
 
 void loop()
@@ -120,10 +120,75 @@ void loop()
     //     return;
     // }
 
-    // Sinusoidal test move
-    if (c == 's')
+    // use IMU angle to control motor velocity
+    if (c == 'a')
     {
-      Serial.println("Executing test move..");
+      Serial.println("Using IMU angle to control the motor for 10 seconds");
+
+      // use velocity control with passthrough
+      odrive_serial << "w axis0.controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
+      odrive_serial << "w axis0.controller.config.input_mode " << INPUT_MODE_PASSTHROUGH << '\n';
+
+      static const unsigned long duration = 10000;
+      unsigned long start = millis();
+
+      while (millis() - start < duration)
+      {
+        mpu.update();
+
+        // get X angle and calculate velocity (limited)
+        float angle = mpu.getAngleX();
+        float velocity = max(min(angle / 2.0f, 10.0f), -10.0f);
+
+        // odrive_serial << "w axis0.controller.input_vel " << velocity << '\n';
+
+        odrive.SetVelocity(0, velocity);
+
+        Serial << "Angle: " << angle << ", velocity: " << velocity << '\n';
+      }
+
+      odrive.SetVelocity(0, 0.0f);
+
+      Serial.println("Using IMU angle to control the motor done");
+    }
+
+    // read bus voltage
+    if (c == 'b')
+    {
+      odrive_serial << "r vbus_voltage\n";
+
+      Serial << "Odrive voltage: " << odrive.readFloat() << '\n';
+    }
+
+    // print motor positions in a 10s loop
+    if (c == 'p')
+    {
+      Serial.println("Tracking position for 10 seconds");
+
+      static const unsigned long duration = 10000;
+      unsigned long start = millis();
+
+      while (millis() - start < duration)
+      {
+        for (int motor = 0; motor < 2; ++motor)
+        {
+          Serial << odrive.GetPosition(motor) << '\t';
+        }
+
+        Serial << '\n';
+      }
+
+      Serial.println("Tracking position complete");
+    }
+
+    // test move
+    if (c == 't')
+    {
+      Serial.println("Executing test move");
+
+      // use position control with trapecoidal trajectory
+      odrive_serial << "w axis0.controller.config.control_mode " << CONTROL_MODE_POSITION_CONTROL << '\n';
+      odrive_serial << "w axis0.controller.config.input_mode " << INPUT_MODE_TRAP_TRAJ << '\n';
 
       Serial.println("  > going to zero");
       odrive.SetPosition(0, 0);
@@ -149,30 +214,6 @@ void loop()
       // }
 
       Serial.println("Test move done!");
-    }
-
-    // Read bus voltage
-    if (c == 'b')
-    {
-      odrive_serial << "r vbus_voltage\n";
-
-      Serial << "Vbus voltage: " << odrive.readFloat() << '\n';
-    }
-
-    // print motor positions in a 10s loop
-    if (c == 'p')
-    {
-      static const unsigned long duration = 10000;
-      unsigned long start = millis();
-
-      while (millis() - start < duration)
-      {
-        for (int motor = 0; motor < 2; ++motor)
-        {
-          Serial << odrive.GetPosition(motor) << '\t';
-        }
-        Serial << '\n';
-      }
     }
   }
 }
