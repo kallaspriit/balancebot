@@ -125,9 +125,9 @@ void loop()
     {
       Serial.println("Using IMU angle to control the motor for 10 seconds");
 
-      // use velocity control with passthrough
+      // use velocity control with velocity ramp
       odrive_serial << "w axis0.controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
-      odrive_serial << "w axis0.controller.config.input_mode " << INPUT_MODE_PASSTHROUGH << '\n';
+      odrive_serial << "w axis0.controller.config.input_mode " << INPUT_MODE_VEL_RAMP << '\n';
 
       static const unsigned long duration = 10000;
       unsigned long start = millis();
@@ -138,7 +138,7 @@ void loop()
 
         // get X angle and calculate velocity (limited)
         float angle = mpu.getAngleX();
-        float velocity = max(min(angle / 2.0f, 10.0f), -10.0f);
+        float velocity = max(min(angle / 10.0f, 10.0f), -10.0f);
 
         // odrive_serial << "w axis0.controller.input_vel " << velocity << '\n';
 
