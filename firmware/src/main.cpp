@@ -1,12 +1,16 @@
-#include "BalanceBot.hpp"
+#include "Balancebot.hpp"
 #include "stream_operators.hpp"
 
 // configuration
 const int TARGET_UPDATE_FREQUENCY = 100;
 const int LOOP_DURATION = 1000 / TARGET_UPDATE_FREQUENCY;
+const double PID_P = 0.3;
+const double PID_I = 4.0;
+const double PID_D = 0.005;
 
 // dependency instances
-BalanceBot balanceBot;
+BalancebotConfig config = BalancebotConfig(PID_P, PID_I, PID_D);
+Balancebot balanceBot = Balancebot(config);
 
 // runtime info
 unsigned long lastStepTime = 0;

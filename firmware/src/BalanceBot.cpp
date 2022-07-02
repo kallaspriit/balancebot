@@ -1,17 +1,26 @@
 #include <Arduino.h>
 
-#include "BalanceBot.hpp"
+#include "Balancebot.hpp"
 #include "stream_operators.hpp"
 
-BalanceBot::BalanceBot() : odriveSerial(Serial1), odrive(odriveSerial), mpu(Wire)
+Balancebot::Balancebot(BalancebotConfig config)
+    : odriveSerial(Serial1),
+      odrive(odriveSerial),
+      mpu(Wire),
+      anglePid(PID(&anglePidInput, &anglePidOutput, &anglePidSetpoint, config.pidP, config.pidI, config.pidD, DIRECT)),
+      config(config)
+{
+    anglePid.SetMode(AUTOMATIC);
+    // TODO: configure
+    anglePid.SetOutputLimits(-20, 20);
+    anglePid.SetSampleTime(10);
+}
+
+Balancebot::~Balancebot()
 {
 }
 
-BalanceBot::~BalanceBot()
-{
-}
-
-void BalanceBot::setup()
+void Balancebot::setup()
 {
     // setup I2C bus
     Wire.begin();
@@ -49,7 +58,7 @@ void BalanceBot::setup()
     setState(BalancebotState::Balancing);
 }
 
-void BalanceBot::loop(unsigned long dt, unsigned long currentTime)
+void Balancebot::loop(unsigned long dt, unsigned long currentTime)
 {
     // handle states
     switch (state)
@@ -64,17 +73,22 @@ void BalanceBot::loop(unsigned long dt, unsigned long currentTime)
     }
 }
 
-void BalanceBot::loopBalacingState(unsigned long dt, unsigned long currentTime)
+void Balancebot::loopBalacingState(unsigned long dt, unsigned long currentTime)
 {
     // update the inertial measurement unit
     mpu.update();
 
     // get robot angle and calculate limited velocity
     float angle = mpu.getAngleY();
-    float velocity = max(min(angle, 10.0f), -10.0f);
+
+    anglePidSetpoint = angle;
+    anglePid.Compute();
+
+    // float velocity = max(min(angle, 10.0f), -10.0f);
+    double velocity = anglePidOutput;
 
     // stop motors if angle gets too big
-    if (abs(angle) > 20)
+    if (abs(angle) > 20.0f)
     {
         velocity = 0.0f;
     }
@@ -88,7 +102,7 @@ void BalanceBot::loopBalacingState(unsigned long dt, unsigned long currentTime)
     Serial << (currentTime / 1000.0f) << '\t' << angle << '\t' << velocity << '\t' << dt << '\n';
 }
 
-void BalanceBot::setState(BalancebotState newState)
+void Balancebot::setState(BalancebotState newState)
 {
     if (newState == state)
     {
@@ -111,28 +125,28 @@ void BalanceBot::setState(BalancebotState newState)
     Serial << "Transitioned from state " << getStateName(state) << " to " << getStateName(newState) << '\n';
 }
 
-void BalanceBot::setError(String newError)
+void Balancebot::setError(String newError)
 {
     error = newError;
 
     setState(BalancebotState::Error);
 }
 
-void BalanceBot::onEnterBalacingState()
+void Balancebot::onEnterBalacingState()
 {
     // use velocity control with velocity ramp
     odriveSerial << "w axis0.controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
     odriveSerial << "w axis0.controller.config.input_mode " << INPUT_MODE_VEL_RAMP << '\n';
 }
 
-void BalanceBot::setMotorVelocities(float velocityLeft, float velocityRight)
+void Balancebot::setMotorVelocities(float velocityLeft, float velocityRight)
 {
     // M0 is right, M1 is left and inverted
-    odrive.SetVelocity(0, velocityRight);
-    odrive.SetVelocity(1, -velocityLeft);
+    odrive.SetVelocity(0, -velocityRight);
+    odrive.SetVelocity(1, velocityLeft);
 }
 
-String BalanceBot::getStateName(BalancebotState state)
+String Balancebot::getStateName(BalancebotState state)
 {
     switch (state)
     {
