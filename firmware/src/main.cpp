@@ -34,11 +34,13 @@ void loop()
   balanceBot.loop(dt, currentTime);
 
   // calculate time to sleep to achieve target update frequency
-  int sleepTimeMs = LOOP_DURATION - (int)dt;
+  // int sleepTimeMs = LOOP_DURATION - (int)dt;
 
-  // sleep to  achieve target update frequency
-  if (sleepTimeMs > 0)
-  {
-    delay(sleepTimeMs);
-  }
+  // // sleep to  achieve target update frequency
+  // if (sleepTimeMs > 0)
+  // {
+  //   delay(sleepTimeMs);
+  // }
+
+  lastStepTime = currentTime;
 }

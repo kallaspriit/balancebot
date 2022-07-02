@@ -56,32 +56,36 @@ void BalanceBot::loop(unsigned long dt, unsigned long currentTime)
     {
     case BalancebotState::Balancing:
         loopBalacingState(dt, currentTime);
+        break;
+
+    default:
+        // ignore
+        break;
     }
 }
 
 void BalanceBot::loopBalacingState(unsigned long dt, unsigned long currentTime)
 {
+    // update the inertial measurement unit
     mpu.update();
 
     // get robot angle and calculate limited velocity
     float angle = mpu.getAngleY();
     float velocity = max(min(angle, 10.0f), -10.0f);
 
-    // stop motors if angle is too big
+    // stop motors if angle gets too big
     if (abs(angle) > 20)
     {
-        odrive.SetVelocity(0, 0);
-        odrive.SetVelocity(1, 0);
-
-        Serial << "Angle: " << angle << " too large, stopping motors" << '\n';
-
-        return;
+        velocity = 0.0f;
     }
 
     // set motor velocities
     setMotorVelocities(velocity, velocity);
 
-    Serial << "Angle: " << angle << ", velocity: " << velocity << '\n';
+    // Serial << "Angle: " << angle << ", velocity: " << velocity << '\n';
+
+    // log for serial plotter
+    Serial << (currentTime / 1000.0f) << '\t' << angle << '\t' << velocity << '\t' << dt << '\n';
 }
 
 void BalanceBot::setState(BalancebotState newState)
@@ -98,6 +102,10 @@ void BalanceBot::setState(BalancebotState newState)
     {
     case BalancebotState::Balancing:
         onEnterBalacingState();
+
+    default:
+        // ignore
+        break;
     }
 
     Serial << "Transitioned from state " << getStateName(state) << " to " << getStateName(newState) << '\n';
