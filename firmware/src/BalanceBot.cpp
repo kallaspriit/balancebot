@@ -9,6 +9,9 @@ Balancebot::Balancebot(BalancebotConfig config)
       mpu(Wire),
       anglePid(PID(&anglePidInput, &anglePidOutput, &anglePidSetpoint, config.anglePidP, config.anglePidI, config.anglePidD, DIRECT)),
       positionPid(PID(&positionPidInput, &positionPidOutput, &positionPidSetpoint, config.positionPidP, config.positionPidI, config.positionPidD, DIRECT)),
+      statusService("19B10000-E8F2-537E-4F6C-D104768A1214"),
+      isUprightCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify),
+      angleCharacteristic("19B10002-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify),
       config(config)
 {
     // TODO: configure pid parameters and make configurable from outside
@@ -27,6 +30,23 @@ Balancebot::~Balancebot()
 }
 
 void Balancebot::setup()
+{
+    // setup everything
+    setupPins();
+    setupMpu();
+    setupOdrive();
+    setupBluetooth();
+
+    // go to balancing state
+    setState(BalancebotState::Balancing);
+}
+
+void Balancebot::setupPins()
+{
+    pinMode(LED_BUILTIN, OUTPUT);
+}
+
+void Balancebot::setupMpu()
 {
     // setup I2C bus
     Wire.begin();
@@ -52,34 +72,141 @@ void Balancebot::setup()
     mpu.calcOffsets();
 
     Serial << " done!" << '\n';
+}
 
+void Balancebot::setupOdrive()
+{
     Serial << "Setting up odrive..";
 
     // setup odrive serial
     odriveSerial.begin(115200);
 
-    Serial << " done!" << '\n';
+    // TODO: configure axes
 
-    // go to balancing state
-    setState(BalancebotState::Balancing);
+    Serial << " done!" << '\n';
+}
+
+void Balancebot::setupBluetooth()
+{
+    Serial << "Setting up bluetooth low energy..";
+
+    // start bluetooth low energy stack
+    if (!BLE.begin())
+    {
+        Serial << "starting bluetooth low energy module failed!" << '\n';
+
+        return;
+    }
+
+    // set name
+    BLE.setLocalName("Balancebot");
+
+    // add advertised services
+    BLE.setAdvertisedService(statusService);
+
+    // add characteristics
+    statusService.addCharacteristic(isUprightCharacteristic);
+    statusService.addCharacteristic(angleCharacteristic);
+
+    // add the services
+    BLE.addService(statusService);
+
+    // write initial led characteristic value
+    isUprightCharacteristic.writeValue(false);
+    angleCharacteristic.writeValue(0.0f);
+
+    // start advertising
+    BLE.advertise();
+
+    Serial << " done!" << '\n';
 }
 
 void Balancebot::loop(unsigned long dt, unsigned long currentTime)
+{
+    loopBluetooth(dt, currentTime, loopIndex);
+    loopRobot(dt, currentTime, loopIndex);
+
+    loopIndex++;
+}
+
+void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTime, int loopIndex)
+{
+    bool isBluetoothConnected = BLE.connected();
+
+    // check for change of bluetooth connection state
+    if (isBluetoothConnected != wasBluetoothConnected)
+    {
+        digitalWrite(LED_BUILTIN, isBluetoothConnected);
+
+        wasBluetoothConnected = isBluetoothConnected;
+
+        Serial << "Bluetooth " << (isBluetoothConnected ? "connected" : "disconnected") << '\n';
+    }
+
+    // nothing to do if not connected
+    if (!isBluetoothConnected)
+    {
+        return;
+    }
+
+    // poll bluetooth for updates
+    // BLE.poll();
+
+    // attempt to get central device
+    // BLEDevice central = BLE.central();
+
+    // if (central)
+    // {
+    //     Serial << "Connected to central: " << central.address() << '\n';
+    //     digitalWrite(LED_BUILTIN, HIGH);
+    // }
+    // else
+    // {
+    //     digitalWrite(LED_BUILTIN, loopIndex % 2 == 0 ? HIGH : LOW);
+
+    //     // Serial << "Waiting for bluetooth connection\n";
+    // }
+
+    // consider robot upright if the angle is small enough
+    bool isUpright = abs(angle) < 2.0f;
+
+    if (isUpright != isUprightCharacteristic.value())
+    {
+        isUprightCharacteristic.writeValue(isUpright);
+
+        Serial << "Updated upright status to " << (isUpright ? "yes" : "no") << '\n';
+    }
+
+    // calculate time since last reported angle via ble
+    unsigned long timeSinceReportedAngle = currentTime - lastAngleReportedTime;
+
+    // report robot angle at certain interval
+    if (timeSinceReportedAngle > REPORT_ANGLE_INTERVAL_MS)
+    {
+        angleCharacteristic.writeValue(angle);
+
+        Serial << "Reported angle of " << angle << " degrees\n";
+
+        lastAngleReportedTime = currentTime;
+    }
+}
+
+void Balancebot::loopRobot(unsigned long dt, unsigned long currentTime, int loopIndex)
 {
     // handle states
     switch (state)
     {
     case BalancebotState::Balancing:
-        loopBalacingState(dt, currentTime);
+        loopRobotBalacing(dt, currentTime, loopIndex);
         break;
 
     default:
-        // ignore
+        // ignore other states
         break;
     }
 }
 
-void Balancebot::loopBalacingState(unsigned long dt, unsigned long currentTime)
+void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTime, int loopIndex)
 {
     // TODO: get from configuration / potentiometer
     double idleTargetAngle = 0.0;
@@ -106,7 +233,7 @@ void Balancebot::loopBalacingState(unsigned long dt, unsigned long currentTime)
     mpu.update();
 
     // get robot angle and calculate limited velocity
-    float angle = mpu.getAngleY();
+    angle = mpu.getAngleY();
 
     // calculate angle holding PID controller
     anglePidInput = angle;
@@ -134,6 +261,8 @@ void Balancebot::setState(BalancebotState newState)
     if (newState == state)
     {
         Serial << "Requested to transition to state " << getStateName(newState) << " but the robot is already in given state" << '\n';
+
+        return;
     }
 
     state = newState;

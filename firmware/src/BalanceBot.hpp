@@ -6,6 +6,7 @@
 #include <MPU6050_light.h>
 #include <PID_v1.h>
 #include <Wire.h>
+#include <ArduinoBLE.h>
 
 enum BalancebotState
 {
@@ -50,6 +51,17 @@ public:
     void loop(unsigned long dt, unsigned long currentTime);
 
 private:
+    void setupPins();
+    void setupMpu();
+    void setupOdrive();
+    void setupBluetooth();
+
+    void onEnterBalacingState();
+
+    void loopBluetooth(unsigned long dt, unsigned long currentTime, int loopIndex);
+    void loopRobot(unsigned long dt, unsigned long currentTime, int loopIndex);
+    void loopRobotBalacing(unsigned long dt, unsigned long currentTime, int loopIndex);
+
     String getStateName(BalancebotState state);
     BalancebotOdometry getOdometry();
 
@@ -58,10 +70,6 @@ private:
     void setState(BalancebotState newState);
     void setError(String error);
 
-    void onEnterBalacingState();
-
-    void loopBalacingState(unsigned long dt, unsigned long currentTime);
-
     // dependencies
     HardwareSerial &odriveSerial;
     ODriveArduino odrive;
@@ -69,12 +77,19 @@ private:
     PID anglePid;
     PID positionPid;
 
+    // bluetooth low energy controls
+    BLEService statusService;
+    BLEBoolCharacteristic isUprightCharacteristic;
+    BLEFloatCharacteristic angleCharacteristic;
+
     // configuration
     BalancebotConfig config;
 
     // runtime state
     BalancebotState state = BalancebotState::Initializing;
     String error = "";
+    float angle = 0.0f;
+    bool wasBluetoothConnected = false;
 
     // angle pid controller
     double anglePidSetpoint = 0.0;
@@ -85,6 +100,13 @@ private:
     double positionPidSetpoint = 0.0;
     double positionPidInput = 0.0;
     double positionPidOutput = 0.0;
+
+    // timing
+    int loopIndex = 0;
+    unsigned long lastAngleReportedTime = 0;
+
+    // constants
+    unsigned long REPORT_ANGLE_INTERVAL_MS = 100;
 };
 
 #endif // BALANCEBOT_HPP
