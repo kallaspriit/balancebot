@@ -10,48 +10,50 @@ import './src/ui/device_list.dart';
 
 import 'src/ble/ble_logger.dart';
 
-const _themeColor = Colors.lightGreen;
-
 void main() {
+  // ensure bindings are initialized
   WidgetsFlutterBinding.ensureInitialized();
 
-  final _bleLogger = BleLogger();
-  final _ble = FlutterReactiveBle();
-  final _scanner = BleScanner(ble: _ble, logMessage: _bleLogger.addToLog);
-  final _monitor = BleStatusMonitor(_ble);
-  final _connector = BleDeviceConnector(
-    ble: _ble,
-    logMessage: _bleLogger.addToLog,
+  // setup services
+  final bleLogger = BleLogger();
+  final ble = FlutterReactiveBle();
+  final scanner = BleScanner(ble: ble, logMessage: bleLogger.addToLog);
+  final monitor = BleStatusMonitor(ble);
+  final connector = BleDeviceConnector(
+    ble: ble,
+    logMessage: bleLogger.addToLog,
   );
-  final _serviceDiscoverer = BleDeviceInteractor(
-    bleDiscoverServices: _ble.discoverServices,
-    readCharacteristic: _ble.readCharacteristic,
-    writeWithResponse: _ble.writeCharacteristicWithResponse,
-    writeWithOutResponse: _ble.writeCharacteristicWithoutResponse,
-    subscribeToCharacteristic: _ble.subscribeToCharacteristic,
-    logMessage: _bleLogger.addToLog,
+  final serviceDiscoverer = BleDeviceInteractor(
+    bleDiscoverServices: ble.discoverServices,
+    readCharacteristic: ble.readCharacteristic,
+    writeWithResponse: ble.writeCharacteristicWithResponse,
+    writeWithOutResponse: ble.writeCharacteristicWithoutResponse,
+    subscribeToCharacteristic: ble.subscribeToCharacteristic,
+    logMessage: bleLogger.addToLog,
   );
+
+  // run app with providers
   runApp(
     MultiProvider(
       providers: [
-        Provider.value(value: _scanner),
-        Provider.value(value: _monitor),
-        Provider.value(value: _connector),
-        Provider.value(value: _serviceDiscoverer),
-        Provider.value(value: _bleLogger),
+        Provider.value(value: scanner),
+        Provider.value(value: monitor),
+        Provider.value(value: connector),
+        Provider.value(value: serviceDiscoverer),
+        Provider.value(value: bleLogger),
         StreamProvider<BleScannerState?>(
-          create: (_) => _scanner.state,
+          create: (_) => scanner.state,
           initialData: const BleScannerState(
             discoveredDevices: [],
             scanIsInProgress: false,
           ),
         ),
         StreamProvider<BleStatus?>(
-          create: (_) => _monitor.state,
+          create: (_) => monitor.state,
           initialData: BleStatus.unknown,
         ),
         StreamProvider<ConnectionStateUpdate>(
-          create: (_) => _connector.state,
+          create: (_) => connector.state,
           initialData: const ConnectionStateUpdate(
             deviceId: 'Unknown device',
             connectionState: DeviceConnectionState.disconnected,
@@ -60,9 +62,9 @@ void main() {
         ),
       ],
       child: MaterialApp(
-        title: 'Flutter Reactive BLE example',
-        color: _themeColor,
-        theme: ThemeData(primarySwatch: _themeColor),
+        title: 'Balancebot',
+        color: Colors.lightGreen,
+        theme: ThemeData(primarySwatch: Colors.lightGreen),
         home: const HomeScreen(),
       ),
     ),
