@@ -1,3 +1,4 @@
+import 'package:balancebot/screens/device_list_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:provider/provider.dart';
@@ -6,7 +7,7 @@ import './src/ble/ble_device_interactor.dart';
 import './src/ble/ble_scanner.dart';
 import './src/ble/ble_status_monitor.dart';
 import './src/ui/ble_status_screen.dart';
-import './src/ui/device_list.dart';
+// import './src/ui/device_list.dart';
 
 import 'src/ble/ble_logger.dart';
 
@@ -61,11 +62,11 @@ void main() {
           ),
         ),
       ],
-      child: MaterialApp(
+      child: const MaterialApp(
         title: 'Balancebot',
-        color: Colors.lightGreen,
-        theme: ThemeData(primarySwatch: Colors.lightGreen),
-        home: const HomeScreen(),
+        // color: Colors.lightGreen,
+        // theme: ThemeData(primarySwatch: Colors.lightGreen),
+        home: HomeScreen(),
       ),
     ),
   );

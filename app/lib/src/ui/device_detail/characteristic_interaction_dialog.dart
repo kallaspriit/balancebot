@@ -72,7 +72,10 @@ class _CharacteristicInteractionDialogState
 
   @override
   void dispose() {
-    subscribeStream?.cancel();
+    if (subscribeStream != null) {
+      subscribeStream!.cancel();
+    }
+    // subscribeStream?.cancel();
     super.dispose();
   }
 
