@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
-import '../src/ble/ble_device_connector.dart';
 import '../src/ble/ble_scanner.dart';
 import 'device_details_screen.dart';
 
@@ -29,10 +27,11 @@ class DeviceListScreen extends HookWidget {
           title: const Text("Scanning for devices"),
           actions: [
             Center(
-                child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text("Found ${bleScannerState.discoveredDevices.length.toString()} devices"),
-            )),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text("Found ${bleScannerState.discoveredDevices.length.toString()} devices"),
+              ),
+            ),
           ],
         ),
         body: DeviceList(
@@ -65,7 +64,6 @@ class DeviceList extends HookWidget {
 
     // render list of devices
     return ListView.builder(
-      shrinkWrap: true,
       itemCount: bleScannerState.discoveredDevices.length,
       itemBuilder: (context, index) => ListTile(
         title: Text(bleScannerState.discoveredDevices[index].name.isNotEmpty
