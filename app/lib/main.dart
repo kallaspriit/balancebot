@@ -1,4 +1,4 @@
-import 'package:balancebot/screens/device_list_screen.dart';
+import 'package:balancebot/screens/home_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:provider/provider.dart';
@@ -6,9 +6,6 @@ import './src/ble/ble_device_connector.dart';
 import './src/ble/ble_device_interactor.dart';
 import './src/ble/ble_scanner.dart';
 import './src/ble/ble_status_monitor.dart';
-import './src/ui/ble_status_screen.dart';
-// import './src/ui/device_list.dart';
-
 import 'src/ble/ble_logger.dart';
 
 void main() {
@@ -64,27 +61,8 @@ void main() {
       ],
       child: const MaterialApp(
         title: 'Balancebot',
-        // color: Colors.lightGreen,
-        // theme: ThemeData(primarySwatch: Colors.lightGreen),
         home: HomeScreen(),
       ),
     ),
   );
-}
-
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({
-    Key? key,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) => Consumer<BleStatus?>(
-        builder: (_, status, __) {
-          if (status == BleStatus.ready) {
-            return const DeviceListScreen();
-          } else {
-            return BleStatusScreen(status: status ?? BleStatus.unknown);
-          }
-        },
-      );
 }
