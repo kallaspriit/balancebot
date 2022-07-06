@@ -10,8 +10,7 @@ Balancebot::Balancebot(BalancebotConfig config)
       anglePid(PID(&anglePidInput, &anglePidOutput, &anglePidSetpoint, config.anglePidP, config.anglePidI, config.anglePidD, DIRECT)),
       positionPid(PID(&positionPidInput, &positionPidOutput, &positionPidSetpoint, config.positionPidP, config.positionPidI, config.positionPidD, DIRECT)),
       statusService("19B10000-E8F2-537E-4F6C-D104768A1214"),
-      isUprightCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify),
-      angleCharacteristic("19B10002-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify),
+      angleCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify),
       config(config)
 {
     // TODO: configure pid parameters and make configurable from outside
@@ -105,14 +104,12 @@ void Balancebot::setupBluetooth()
     BLE.setAdvertisedService(statusService);
 
     // add characteristics
-    statusService.addCharacteristic(isUprightCharacteristic);
     statusService.addCharacteristic(angleCharacteristic);
 
     // add the services
     BLE.addService(statusService);
 
     // write initial led characteristic value
-    isUprightCharacteristic.writeValue(false);
     angleCharacteristic.writeValue(0.0f);
 
     // start advertising
@@ -166,16 +163,6 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTime, int 
 
     //     // Serial << "Waiting for bluetooth connection\n";
     // }
-
-    // consider robot upright if the angle is small enough
-    bool isUpright = abs(angle) < 2.0f;
-
-    if (isUpright != isUprightCharacteristic.value())
-    {
-        isUprightCharacteristic.writeValue(isUpright);
-
-        Serial << "Updated upright status to " << (isUpright ? "yes" : "no") << '\n';
-    }
 
     // calculate time since last reported angle via ble
     unsigned long timeSinceReportedAngle = currentTime - lastAngleReportedTime;

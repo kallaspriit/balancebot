@@ -79,7 +79,6 @@ private:
 
     // bluetooth low energy controls
     BLEService statusService;
-    BLEBoolCharacteristic isUprightCharacteristic;
     BLEFloatCharacteristic angleCharacteristic;
 
     // configuration

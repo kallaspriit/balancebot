@@ -5,13 +5,14 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
+import '../services/uint8_list_parse_bool.dart';
+import '../services/uint8_list_parse_float.dart';
 import '../src/ble/ble_device_connector.dart';
 import '../src/ble/ble_device_interactor.dart';
 import '../src/ble/ble_scanner.dart';
-import 'balancebot_screen.dart';
 
-class DeviceDetailsScreen extends HookWidget {
-  const DeviceDetailsScreen({Key? key, required this.deviceId}) : super(key: key);
+class BalancebotScreen extends HookWidget {
+  const BalancebotScreen({Key? key, required this.deviceId}) : super(key: key);
 
   final String deviceId;
 
@@ -49,7 +50,7 @@ class DeviceDetailsScreen extends HookWidget {
         },
         child: Scaffold(
           appBar: AppBar(
-            title: Text("Device ${device.name.isNotEmpty ? device.name : device.id}"),
+            title: const Text("Balancebot"),
             actions: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -75,7 +76,7 @@ class DeviceDetailsScreen extends HookWidget {
               ),
             ],
           ),
-          body: DeviceDetails(
+          body: Balancebot(
             device: device,
             bleDeviceConnector: bleDeviceConnector,
             bleDeviceInteractor: bleDeviceInteractor,
@@ -88,8 +89,8 @@ class DeviceDetailsScreen extends HookWidget {
   }
 }
 
-class DeviceDetails extends HookWidget {
-  const DeviceDetails({
+class Balancebot extends HookWidget {
+  const Balancebot({
     Key? key,
     required this.device,
     required this.bleDeviceConnector,
@@ -182,7 +183,7 @@ class DeviceDetails extends HookWidget {
 
             // subscribe and update characteristic values
             bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
-              // debugPrint("Got characteristic update: ${value.toString()}");
+              // debugPrint("Got characteristic update: ${value.join(",")}");
 
               characteristicValues.value[characteristic.characteristicId] = value;
             });
@@ -210,76 +211,34 @@ class DeviceDetails extends HookWidget {
         discoveredServices.value.firstWhereOrNull((service) => service.serviceId == statusServiceUuid);
     final isBalancebot = balancebotStatusService != null;
 
+    if (!isBalancebot) {
+      return const ErrorScreen(error: "Given BLE device does not appear to be Balancebot");
+    }
+
+    final angleCharacteristic = balancebotStatusService.characteristics
+        .firstWhereOrNull((characteristic) => characteristic.characteristicId == angleCharacteristicUuid);
+
+    if (angleCharacteristic == null) {
+      return const ErrorScreen(error: "Required balancebot characteristics could not be found");
+    }
+
+    final angle = unint8ListParseFloat(characteristicValues.value[angleCharacteristicUuid] ?? [0, 0, 0, 0]);
+
     // render device details
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return ListView(
       children: [
-        Expanded(
-          child: ListView(
-            children: [
-              ListTile(
-                title: const Text("Id"),
-                subtitle: Text(device.id),
-              ),
-              ListTile(
-                title: const Text("Name"),
-                subtitle: Text(device.name.isNotEmpty ? device.name : "n/a"),
-              ),
-              ListTile(
-                title: const Text("RSSI"),
-                subtitle: Text(device.rssi.toString()),
-              ),
-              ListTile(
-                title: const Text("Advertised service UUIDs"),
-                subtitle: Text(device.serviceUuids.map((uuid) => uuid.toString()).join(", ")),
-              ),
-              ListTile(
-                title: const Text("Manufacturer data"),
-                subtitle: Text(device.manufacturerData.isNotEmpty ? device.manufacturerData.join(":") : "n/a"),
-              ),
-              ListTile(
-                title: const Text("Service data"),
-                subtitle: Text(device.serviceData.isNotEmpty ? device.serviceData.toString() : "n/a"),
-              ),
-              ListTile(
-                title: const Text("Connection status"),
-                subtitle: Text(connectionStateUpdate.connectionState.toString()),
-              ),
-              ...discoveredServices.value.map(
-                (discoveredService) => ListTile(
-                  title: Text("Service ${discoveredService.serviceId.toString()}"),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: discoveredService.characteristicIds
-                        .map((characteristicId) => Text(characteristicId.toString()))
-                        .toList(),
-                  ),
-                ),
-              ),
-              ...characteristicValues.value.entries.map(
-                (entry) => ListTile(
-                  title: Text(getCharacteristicName(entry.key)),
-                  subtitle: Text(entry.value.toString()),
-                ),
-              ),
-            ],
-          ),
+        ListTile(
+          title: const Text("Id"),
+          subtitle: Text(device.id),
         ),
-        isBalancebot
-            ? Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ElevatedButton(
-                    onPressed: () => Navigator.push<void>(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BalancebotScreen(
-                              deviceId: device.id,
-                            ),
-                          ),
-                        ),
-                    child: const Text("Control as Balancebot")),
-              )
-            : const SizedBox.shrink()
+        ListTile(
+          title: const Text("Name"),
+          subtitle: Text(device.name.isNotEmpty ? device.name : "n/a"),
+        ),
+        ListTile(
+          title: const Text("Angle"),
+          subtitle: Text("${angle.toStringAsFixed(2)} degrees"),
+        ),
       ],
     );
   }
