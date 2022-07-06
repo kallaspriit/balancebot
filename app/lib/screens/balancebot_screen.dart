@@ -1,12 +1,16 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:balancebot/screens/error_screen.dart';
+import 'package:balancebot/services/parse_characteristic_float.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 
-import '../services/uint8_list_parse_bool.dart';
-import '../services/uint8_list_parse_float.dart';
+import '../services/build_characteristic_int32.dart';
+import '../services/parse_characteristic_int32.dart';
 import '../src/ble/ble_device_connector.dart';
 import '../src/ble/ble_device_interactor.dart';
 import '../src/ble/ble_scanner.dart';
@@ -40,49 +44,40 @@ class BalancebotScreen extends HookWidget {
       final isConnected = connectionStateUpdate.deviceId == device.id &&
           connectionStateUpdate.connectionState == DeviceConnectionState.connected;
 
-      return WillPopScope(
-        onWillPop: () async {
-          debugPrint("Navigating away from device details screen, disconnecting");
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text("Balancebot"),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: GestureDetector(
+                onTap: () {
+                  debugPrint("Attempting to connect again to device ${device.id}");
 
-          bleDeviceConnector.disconnect(device.id);
-
-          return true;
-        },
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text("Balancebot"),
-            actions: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: GestureDetector(
-                  onTap: () {
-                    debugPrint("Attempting to connect again to device ${device.id}");
-
-                    bleDeviceConnector.connect(device.id);
-                  },
-                  child: isConnected
-                      ? const Icon(
-                          Icons.bluetooth_connected,
-                          size: 26.0,
-                        )
-                      : const AspectRatio(
-                          aspectRatio: 1.0,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 3,
-                          ),
+                  bleDeviceConnector.connect(device.id);
+                },
+                child: isConnected
+                    ? const Icon(
+                        Icons.bluetooth_connected,
+                        size: 26.0,
+                      )
+                    : const AspectRatio(
+                        aspectRatio: 1.0,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 3,
                         ),
-                ),
+                      ),
               ),
-            ],
-          ),
-          body: Balancebot(
-            device: device,
-            bleDeviceConnector: bleDeviceConnector,
-            bleDeviceInteractor: bleDeviceInteractor,
-            bleScannerState: bleScannerState,
-            connectionStateUpdate: connectionStateUpdate,
-          ),
+            ),
+          ],
+        ),
+        body: Balancebot(
+          device: device,
+          bleDeviceConnector: bleDeviceConnector,
+          bleDeviceInteractor: bleDeviceInteractor,
+          bleScannerState: bleScannerState,
+          connectionStateUpdate: connectionStateUpdate,
         ),
       );
     });
@@ -101,11 +96,14 @@ class Balancebot extends HookWidget {
 
   // known service identifiers
   static final statusServiceUuid = Uuid.parse("19B10000-E8F2-537E-4F6C-D104768A1214");
+  static final controlServiceUuid = Uuid.parse("40760000-8912-48af-9146-b057c465d970");
   static final angleCharacteristicUuid = Uuid.parse("19B10001-E8F2-537E-4F6C-D104768A1214");
+  static final targetSpeedCharacteristicUuid = Uuid.parse("40760001-8912-48af-9146-b057c465d970");
 
   // map of known characteristic names
   static final characteristicNames = {
     angleCharacteristicUuid: "Angle",
+    targetSpeedCharacteristicUuid: "Target speed",
   };
 
   final DiscoveredDevice device;
@@ -162,6 +160,9 @@ class Balancebot extends HookWidget {
 
     // subscribe to characteristics once connected
     useEffect(() {
+      // keep track of stream subscriptions
+      List<StreamSubscription<List<int>>> characteristicSubscriptions = [];
+
       for (final discoveredService in discoveredServices.value) {
         debugPrint(
           "Discovered service: ${discoveredService.serviceId} with ${discoveredService.characteristics.length} characteristics",
@@ -170,30 +171,35 @@ class Balancebot extends HookWidget {
         // handle discovered characteristics
         for (final discoveredCharacteristic in discoveredService.characteristics) {
           final characteristic = QualifiedCharacteristic(
+            deviceId: device.id,
             serviceId: discoveredCharacteristic.serviceId,
             characteristicId: discoveredCharacteristic.characteristicId,
-            deviceId: device.id,
           );
 
           // subscribe to characteristic if it's notifiable
           if (discoveredCharacteristic.isNotifiable) {
             debugPrint(
-              "Subscribing to characteristic ${characteristic.characteristicId} on service ${characteristic.serviceId}",
+              "Subscribing to ${getCharacteristicName(characteristic.characteristicId)} on service ${characteristic.serviceId}",
             );
 
             // subscribe and update characteristic values
-            bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
-              // debugPrint("Got characteristic update: ${value.join(",")}");
+            final characteristicSubscription =
+                bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
+              // debugPrint(
+              //   "Got ${getCharacteristicName(characteristic.characteristicId)} update: ${value.join(",")}",
+              // );
 
               characteristicValues.value[characteristic.characteristicId] = value;
             });
+
+            characteristicSubscriptions.add(characteristicSubscription);
           }
 
           // attempt to read initial characteristic value if readable
           if (discoveredCharacteristic.isReadable) {
             try {
               bleDeviceInteractor.readCharacteristic(characteristic).then((value) {
-                debugPrint("Read characteristic value: ${value.toString()}");
+                debugPrint("Read ${getCharacteristicName(characteristic.characteristicId)} value: ${value.toString()}");
 
                 characteristicValues.value[characteristic.characteristicId] = value;
               });
@@ -204,8 +210,28 @@ class Balancebot extends HookWidget {
         }
       }
 
-      return () {};
+      return () {
+        // cancel all subscriptions
+        // for (final characteristicSubscription in characteristicSubscriptions) {
+        //   debugPrint("Cancelling subscription");
+
+        //   characteristicSubscription.cancel();
+        // }
+      };
     }, [discoveredServices.value]);
+
+    // sets target speed characteristic
+    final setTargetSpeed = useCallback((int speed) {
+      debugPrint("Setting target speed: $speed");
+
+      final characteristic = QualifiedCharacteristic(
+        deviceId: device.id,
+        serviceId: controlServiceUuid,
+        characteristicId: targetSpeedCharacteristicUuid,
+      );
+
+      bleDeviceInteractor.writeCharacterisiticWithoutResponse(characteristic, buildCharacteristicInt32(speed));
+    }, []);
 
     final balancebotStatusService =
         discoveredServices.value.firstWhereOrNull((service) => service.serviceId == statusServiceUuid);
@@ -215,30 +241,42 @@ class Balancebot extends HookWidget {
       return const ErrorScreen(error: "Given BLE device does not appear to be Balancebot");
     }
 
-    final angleCharacteristic = balancebotStatusService.characteristics
-        .firstWhereOrNull((characteristic) => characteristic.characteristicId == angleCharacteristicUuid);
-
-    if (angleCharacteristic == null) {
-      return const ErrorScreen(error: "Required balancebot characteristics could not be found");
-    }
-
-    final angle = unint8ListParseFloat(characteristicValues.value[angleCharacteristicUuid] ?? [0, 0, 0, 0]);
+    // get characteristic values
+    final angle = parseCharacteristicFloat(characteristicValues.value[angleCharacteristicUuid] ?? [0, 0, 0, 0]);
+    final targetSpeed =
+        parseCharacteristicInt32(characteristicValues.value[targetSpeedCharacteristicUuid] ?? [0, 0, 0, 0]);
 
     // render device details
     return ListView(
       children: [
         ListTile(
-          title: const Text("Id"),
-          subtitle: Text(device.id),
-        ),
-        ListTile(
-          title: const Text("Name"),
-          subtitle: Text(device.name.isNotEmpty ? device.name : "n/a"),
-        ),
-        ListTile(
           title: const Text("Angle"),
           subtitle: Text("${angle.toStringAsFixed(2)} degrees"),
         ),
+        ListTile(
+          title: const Text("Target speed"),
+          subtitle: Text("$targetSpeed degrees"),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => setTargetSpeed(targetSpeed - 1),
+                  child: const Text("Decrease speed"),
+                ),
+              ),
+              Container(width: 16),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => setTargetSpeed(targetSpeed + 1),
+                  child: const Text("Increase speed"),
+                ),
+              ),
+            ],
+          ),
+        )
       ],
     );
   }
@@ -246,6 +284,6 @@ class Balancebot extends HookWidget {
   String getCharacteristicName(Uuid id) {
     final name = characteristicNames[id];
 
-    return name ?? "Characteristic ${id.toString()}";
+    return name != null ? "$name ($id)" : "characteristic ${id.toString()}";
   }
 }

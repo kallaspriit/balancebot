@@ -10,7 +10,9 @@ Balancebot::Balancebot(BalancebotConfig config)
       anglePid(PID(&anglePidInput, &anglePidOutput, &anglePidSetpoint, config.anglePidP, config.anglePidI, config.anglePidD, DIRECT)),
       positionPid(PID(&positionPidInput, &positionPidOutput, &positionPidSetpoint, config.positionPidP, config.positionPidI, config.positionPidD, DIRECT)),
       statusService("19B10000-E8F2-537E-4F6C-D104768A1214"),
+      controlService("40760000-8912-48af-9146-b057c465d970"),
       angleCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify),
+      targetSpeedCharacteristic("40760001-8912-48af-9146-b057c465d970", BLERead | BLENotify | BLEWriteWithoutResponse),
       config(config)
 {
     // TODO: configure pid parameters and make configurable from outside
@@ -102,15 +104,19 @@ void Balancebot::setupBluetooth()
 
     // add advertised services
     BLE.setAdvertisedService(statusService);
+    BLE.setAdvertisedService(controlService);
 
     // add characteristics
     statusService.addCharacteristic(angleCharacteristic);
+    statusService.addCharacteristic(targetSpeedCharacteristic);
 
     // add the services
     BLE.addService(statusService);
+    BLE.addService(controlService);
 
-    // write initial led characteristic value
+    // write initial characteristic values
     angleCharacteristic.writeValue(0.0f);
+    targetSpeedCharacteristic.writeValue(0);
 
     // start advertising
     BLE.advertise();
@@ -150,31 +156,34 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTime, int 
     // BLE.poll();
 
     // attempt to get central device
-    // BLEDevice central = BLE.central();
+    BLEDevice central = BLE.central();
 
-    // if (central)
-    // {
-    //     Serial << "Connected to central: " << central.address() << '\n';
-    //     digitalWrite(LED_BUILTIN, HIGH);
-    // }
-    // else
-    // {
-    //     digitalWrite(LED_BUILTIN, loopIndex % 2 == 0 ? HIGH : LOW);
-
-    //     // Serial << "Waiting for bluetooth connection\n";
-    // }
-
-    // calculate time since last reported angle via ble
-    unsigned long timeSinceReportedAngle = currentTime - lastAngleReportedTime;
-
-    // report robot angle at certain interval
-    if (timeSinceReportedAngle > REPORT_ANGLE_INTERVAL_MS)
+    if (central)
     {
-        angleCharacteristic.writeValue(angle);
+        // Serial << "Connected to central: " << central.address() << '\n';
 
-        Serial << "Reported angle of " << angle << " degrees\n";
+        // handle target speed updates
+        if (targetSpeedCharacteristic.written())
+        {
+            targetSpeed = targetSpeedCharacteristic.value();
 
-        lastAngleReportedTime = currentTime;
+            targetSpeedCharacteristic.writeValue(targetSpeed);
+
+            Serial << "Got new target speed of " << targetSpeed << '\n';
+        }
+
+        // calculate time since last reported angle via ble
+        unsigned long timeSinceReportedAngle = currentTime - lastAngleReportedTime;
+
+        // report robot angle at certain interval
+        if (timeSinceReportedAngle > REPORT_ANGLE_INTERVAL_MS)
+        {
+            angleCharacteristic.writeValue(angle);
+
+            // Serial << "Reported angle of " << angle << " degrees\n";
+
+            lastAngleReportedTime = currentTime;
+        }
     }
 }
 
@@ -195,9 +204,6 @@ void Balancebot::loopRobot(unsigned long dt, unsigned long currentTime, int loop
 
 void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTime, int loopIndex)
 {
-    // TODO: get from configuration / potentiometer
-    double idleTargetAngle = 0.0;
-
     // TODO: get target distance from remote controller
     double targetDistance = 0.0;
 
@@ -222,9 +228,15 @@ void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTime, 
     // get robot angle and calculate limited velocity
     angle = mpu.getAngleY();
 
+    // TODO: get from configuration / potentiometer
+    double idleTargetAngle = 0.0;
+    double speedTargetAngle = (double)targetSpeed;
+
     // calculate angle holding PID controller
     anglePidInput = angle;
-    anglePidSetpoint = idleTargetAngle + positionPidTargetAngle;
+    // TODO: restore position pid
+    // anglePidSetpoint = idleTargetAngle + speedTargetAngle + positionPidTargetAngle;
+    anglePidSetpoint = idleTargetAngle + speedTargetAngle;
     anglePid.Compute();
     double targetVelocity = anglePidOutput;
 
@@ -239,6 +251,8 @@ void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTime, 
     // set motor velocities
     setMotorVelocities(targetVelocity, targetVelocity);
 
+    // Serial << "Setpoint: " << anglePidSetpoint << ", real: " << angle << ", dt: " << dt << '\n';
+
     // log for serial plotter
     // Serial << (currentTime / 1000.0f) << '\t' << angle << '\t' << anglePidSetpoint << '\t' << targetVelocity << '\t' << odometry.leftDistance << '\t' << odometry.rightDistance << '\t' << odometry.averageDistance << '\t' << dt << '\n';
 }
@@ -252,6 +266,7 @@ void Balancebot::setState(BalancebotState newState)
         return;
     }
 
+    BalancebotState oldState = state;
     state = newState;
 
     // handle entering states
@@ -265,7 +280,7 @@ void Balancebot::setState(BalancebotState newState)
         break;
     }
 
-    Serial << "Transitioned from state " << getStateName(state) << " to " << getStateName(newState) << '\n';
+    Serial << "Transitioned from " << getStateName(oldState) << " to " << getStateName(newState) << "state\n";
 }
 
 void Balancebot::setError(String newError)

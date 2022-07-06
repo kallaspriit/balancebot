@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:balancebot/screens/error_screen.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
@@ -100,12 +102,6 @@ class DeviceDetails extends HookWidget {
 
   // known service identifiers
   static final statusServiceUuid = Uuid.parse("19B10000-E8F2-537E-4F6C-D104768A1214");
-  static final angleCharacteristicUuid = Uuid.parse("19B10001-E8F2-537E-4F6C-D104768A1214");
-
-  // map of known characteristic names
-  static final characteristicNames = {
-    angleCharacteristicUuid: "Angle",
-  };
 
   final DiscoveredDevice device;
   final BleDeviceConnector bleDeviceConnector;
@@ -161,6 +157,9 @@ class DeviceDetails extends HookWidget {
 
     // subscribe to characteristics once connected
     useEffect(() {
+      // keep track of stream subscriptions
+      List<StreamSubscription<List<int>>> characteristicSubscriptions = [];
+
       for (final discoveredService in discoveredServices.value) {
         debugPrint(
           "Discovered service: ${discoveredService.serviceId} with ${discoveredService.characteristics.length} characteristics",
@@ -169,9 +168,9 @@ class DeviceDetails extends HookWidget {
         // handle discovered characteristics
         for (final discoveredCharacteristic in discoveredService.characteristics) {
           final characteristic = QualifiedCharacteristic(
+            deviceId: device.id,
             serviceId: discoveredCharacteristic.serviceId,
             characteristicId: discoveredCharacteristic.characteristicId,
-            deviceId: device.id,
           );
 
           // subscribe to characteristic if it's notifiable
@@ -181,18 +180,23 @@ class DeviceDetails extends HookWidget {
             );
 
             // subscribe and update characteristic values
-            bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
-              // debugPrint("Got characteristic update: ${value.toString()}");
+            final characteristicSubscription =
+                bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
+              //  debugPrint(
+              //     "Got characteristic ${getCharacteristicName(characteristic.characteristicId)} update: ${value.join(",")}",
+              //   );
 
               characteristicValues.value[characteristic.characteristicId] = value;
             });
+
+            characteristicSubscriptions.add(characteristicSubscription);
           }
 
           // attempt to read initial characteristic value if readable
           if (discoveredCharacteristic.isReadable) {
             try {
               bleDeviceInteractor.readCharacteristic(characteristic).then((value) {
-                debugPrint("Read characteristic value: ${value.toString()}");
+                debugPrint("Read characteristic ${characteristic.characteristicId} value: ${value.toString()}");
 
                 characteristicValues.value[characteristic.characteristicId] = value;
               });
@@ -203,7 +207,14 @@ class DeviceDetails extends HookWidget {
         }
       }
 
-      return () {};
+      return () {
+        // cancel all subscriptions
+        for (final characteristicSubscription in characteristicSubscriptions) {
+          debugPrint("Cancelling subscription");
+
+          characteristicSubscription.cancel();
+        }
+      };
     }, [discoveredServices.value]);
 
     final balancebotStatusService =
@@ -258,7 +269,7 @@ class DeviceDetails extends HookWidget {
               ),
               ...characteristicValues.value.entries.map(
                 (entry) => ListTile(
-                  title: Text(getCharacteristicName(entry.key)),
+                  title: Text(entry.key.toString()),
                   subtitle: Text(entry.value.toString()),
                 ),
               ),
@@ -282,11 +293,5 @@ class DeviceDetails extends HookWidget {
             : const SizedBox.shrink()
       ],
     );
-  }
-
-  String getCharacteristicName(Uuid id) {
-    final name = characteristicNames[id];
-
-    return name ?? "Characteristic ${id.toString()}";
   }
 }

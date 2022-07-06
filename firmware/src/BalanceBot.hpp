@@ -79,7 +79,9 @@ private:
 
     // bluetooth low energy controls
     BLEService statusService;
+    BLEService controlService;
     BLEFloatCharacteristic angleCharacteristic;
+    BLEIntCharacteristic targetSpeedCharacteristic;
 
     // configuration
     BalancebotConfig config;
@@ -88,6 +90,7 @@ private:
     BalancebotState state = BalancebotState::Initializing;
     String error = "";
     float angle = 0.0f;
+    int targetSpeed = 0;
     bool wasBluetoothConnected = false;
 
     // angle pid controller
