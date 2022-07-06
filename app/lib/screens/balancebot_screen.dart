@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:balancebot/screens/error_screen.dart';
 import 'package:balancebot/services/parse_characteristic_float.dart';
@@ -8,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:flutter_joystick/flutter_joystick.dart';
 
 import '../services/build_characteristic_int32.dart';
 import '../services/parse_characteristic_int32.dart';
@@ -99,11 +99,13 @@ class Balancebot extends HookWidget {
   static final controlServiceUuid = Uuid.parse("40760000-8912-48af-9146-b057c465d970");
   static final angleCharacteristicUuid = Uuid.parse("19B10001-E8F2-537E-4F6C-D104768A1214");
   static final targetSpeedCharacteristicUuid = Uuid.parse("40760001-8912-48af-9146-b057c465d970");
+  static final targetRotationCharacteristicUuid = Uuid.parse("40760002-8912-48af-9146-b057c465d970");
 
   // map of known characteristic names
   static final characteristicNames = {
     angleCharacteristicUuid: "Angle",
     targetSpeedCharacteristicUuid: "Target speed",
+    targetRotationCharacteristicUuid: "Target rotation",
   };
 
   final DiscoveredDevice device;
@@ -116,6 +118,8 @@ class Balancebot extends HookWidget {
   Widget build(BuildContext context) {
     final discoveredServices = useState<List<DiscoveredService>>([]);
     final characteristicValues = useState<Map<Uuid, List<int>>>({});
+    final speedInput = useState(0);
+    final rotationInput = useState(0);
 
     // automatically attempt to connect to the device
     useEffect(() {
@@ -136,7 +140,7 @@ class Balancebot extends HookWidget {
       }
 
       return () {};
-    }, []);
+    }, [connectionStateUpdate.connectionState]);
 
     // discover services
     useEffect(() {
@@ -160,6 +164,10 @@ class Balancebot extends HookWidget {
 
     // subscribe to characteristics once connected
     useEffect(() {
+      if (connectionStateUpdate.connectionState != DeviceConnectionState.connected) {
+        return () {};
+      }
+
       // keep track of stream subscriptions
       List<StreamSubscription<List<int>>> characteristicSubscriptions = [];
 
@@ -185,11 +193,12 @@ class Balancebot extends HookWidget {
             // subscribe and update characteristic values
             final characteristicSubscription =
                 bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
-              // debugPrint(
-              //   "Got ${getCharacteristicName(characteristic.characteristicId)} update: ${value.join(",")}",
-              // );
+              debugPrint(
+                "Got ${getCharacteristicName(characteristic.characteristicId)} update: ${value.join(",")}",
+              );
 
               characteristicValues.value[characteristic.characteristicId] = value;
+              characteristicValues.notifyListeners();
             });
 
             characteristicSubscriptions.add(characteristicSubscription);
@@ -202,6 +211,7 @@ class Balancebot extends HookWidget {
                 debugPrint("Read ${getCharacteristicName(characteristic.characteristicId)} value: ${value.toString()}");
 
                 characteristicValues.value[characteristic.characteristicId] = value;
+                characteristicValues.notifyListeners();
               });
             } on Exception catch (e) {
               debugPrint("Reading characteristic ${characteristic.characteristicId} failed ($e)");
@@ -212,13 +222,13 @@ class Balancebot extends HookWidget {
 
       return () {
         // cancel all subscriptions
-        // for (final characteristicSubscription in characteristicSubscriptions) {
-        //   debugPrint("Cancelling subscription");
+        for (final characteristicSubscription in characteristicSubscriptions) {
+          debugPrint("Cancelling subscription");
 
-        //   characteristicSubscription.cancel();
-        // }
+          characteristicSubscription.cancel();
+        }
       };
-    }, [discoveredServices.value]);
+    }, [discoveredServices.value.length, connectionStateUpdate.connectionState]);
 
     // sets target speed characteristic
     final setTargetSpeed = useCallback((int speed) {
@@ -233,6 +243,33 @@ class Balancebot extends HookWidget {
       bleDeviceInteractor.writeCharacterisiticWithoutResponse(characteristic, buildCharacteristicInt32(speed));
     }, []);
 
+    // sets target rotation characteristic
+    final setTargetRotation = useCallback((int rotation) {
+      debugPrint("Setting target rotation: $rotation");
+
+      final characteristic = QualifiedCharacteristic(
+        deviceId: device.id,
+        serviceId: controlServiceUuid,
+        characteristicId: targetRotationCharacteristicUuid,
+      );
+
+      bleDeviceInteractor.writeCharacterisiticWithoutResponse(characteristic, buildCharacteristicInt32(rotation));
+    }, []);
+
+    // apply target speed
+    useEffect(() {
+      setTargetSpeed(speedInput.value);
+
+      return () {};
+    }, [speedInput.value]);
+
+    // apply target rotation
+    useEffect(() {
+      setTargetRotation(rotationInput.value);
+
+      return () {};
+    }, [rotationInput.value]);
+
     final balancebotStatusService =
         discoveredServices.value.firstWhereOrNull((service) => service.serviceId == statusServiceUuid);
     final isBalancebot = balancebotStatusService != null;
@@ -245,38 +282,59 @@ class Balancebot extends HookWidget {
     final angle = parseCharacteristicFloat(characteristicValues.value[angleCharacteristicUuid] ?? [0, 0, 0, 0]);
     final targetSpeed =
         parseCharacteristicInt32(characteristicValues.value[targetSpeedCharacteristicUuid] ?? [0, 0, 0, 0]);
+    final targetRotation =
+        parseCharacteristicInt32(characteristicValues.value[targetRotationCharacteristicUuid] ?? [0, 0, 0, 0]);
 
     // render device details
-    return ListView(
+    return Column(
       children: [
-        ListTile(
-          title: const Text("Angle"),
-          subtitle: Text("${angle.toStringAsFixed(2)} degrees"),
-        ),
-        ListTile(
-          title: const Text("Target speed"),
-          subtitle: Text("$targetSpeed degrees"),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => setTargetSpeed(targetSpeed - 1),
-                  child: const Text("Decrease speed"),
-                ),
+        Row(
+          children: [
+            Expanded(
+              child: ListTile(
+                title: const Text("Angle"),
+                subtitle: Text("${angle.toStringAsFixed(2)} degrees"),
               ),
-              Container(width: 16),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => setTargetSpeed(targetSpeed + 1),
-                  child: const Text("Increase speed"),
-                ),
+            ),
+            Expanded(
+              child: ListTile(
+                title: const Text("Target speed"),
+                subtitle: Text(targetSpeed.toString()),
+              ),
+            ),
+            Expanded(
+              child: ListTile(
+                title: const Text("Target rotation"),
+                subtitle: Text(targetRotation.toString()),
+              ),
+            ),
+          ],
+        ),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              Joystick(
+                mode: JoystickMode.vertical,
+                listener: (event) {
+                  speedInput.value = (event.y * 5.0).round();
+                },
+                onStickDragEnd: () {
+                  speedInput.value = 0;
+                },
+              ),
+              Joystick(
+                mode: JoystickMode.horizontal,
+                listener: (event) {
+                  rotationInput.value = (event.x * 20.0).round();
+                },
+                onStickDragEnd: () {
+                  rotationInput.value = 0;
+                },
               ),
             ],
           ),
-        )
+        ),
       ],
     );
   }

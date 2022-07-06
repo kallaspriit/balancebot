@@ -180,16 +180,16 @@ class DeviceDetails extends HookWidget {
             );
 
             // subscribe and update characteristic values
-            final characteristicSubscription =
-                bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
-              //  debugPrint(
-              //     "Got characteristic ${getCharacteristicName(characteristic.characteristicId)} update: ${value.join(",")}",
-              //   );
+            // final characteristicSubscription =
+            //     bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
+            //   //  debugPrint(
+            //   //     "Got characteristic ${getCharacteristicName(characteristic.characteristicId)} update: ${value.join(",")}",
+            //   //   );
 
-              characteristicValues.value[characteristic.characteristicId] = value;
-            });
+            //   characteristicValues.value[characteristic.characteristicId] = value;
+            // });
 
-            characteristicSubscriptions.add(characteristicSubscription);
+            // characteristicSubscriptions.add(characteristicSubscription);
           }
 
           // attempt to read initial characteristic value if readable

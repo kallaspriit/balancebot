@@ -13,11 +13,12 @@ Balancebot::Balancebot(BalancebotConfig config)
       controlService("40760000-8912-48af-9146-b057c465d970"),
       angleCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify),
       targetSpeedCharacteristic("40760001-8912-48af-9146-b057c465d970", BLERead | BLENotify | BLEWriteWithoutResponse),
+      targetRotationCharacteristic("40760002-8912-48af-9146-b057c465d970", BLERead | BLENotify | BLEWriteWithoutResponse),
       config(config)
 {
     // TODO: configure pid parameters and make configurable from outside
     anglePid.SetMode(AUTOMATIC);
-    anglePid.SetOutputLimits(-20, 20);
+    anglePid.SetOutputLimits(-30, 30);
     anglePid.SetSampleTime(10);
 
     positionPid.SetMode(AUTOMATIC);
@@ -35,8 +36,8 @@ void Balancebot::setup()
     // setup everything
     setupPins();
     setupMpu();
-    setupOdrive();
     setupBluetooth();
+    setupOdrive();
 
     // go to balancing state
     setState(BalancebotState::Balancing);
@@ -75,18 +76,6 @@ void Balancebot::setupMpu()
     Serial << " done!" << '\n';
 }
 
-void Balancebot::setupOdrive()
-{
-    Serial << "Setting up odrive..";
-
-    // setup odrive serial
-    odriveSerial.begin(115200);
-
-    // TODO: configure axes
-
-    Serial << " done!" << '\n';
-}
-
 void Balancebot::setupBluetooth()
 {
     Serial << "Setting up bluetooth low energy..";
@@ -102,13 +91,16 @@ void Balancebot::setupBluetooth()
     // set name
     BLE.setLocalName("Balancebot");
 
-    // add advertised services
+    // set advertised service
     BLE.setAdvertisedService(statusService);
-    BLE.setAdvertisedService(controlService);
+    // BLE.setAdvertisedService(controlService);
 
-    // add characteristics
+    // add status service characteristics
     statusService.addCharacteristic(angleCharacteristic);
-    statusService.addCharacteristic(targetSpeedCharacteristic);
+
+    // add control service characteristics
+    controlService.addCharacteristic(targetSpeedCharacteristic);
+    controlService.addCharacteristic(targetRotationCharacteristic);
 
     // add the services
     BLE.addService(statusService);
@@ -117,6 +109,7 @@ void Balancebot::setupBluetooth()
     // write initial characteristic values
     angleCharacteristic.writeValue(0.0f);
     targetSpeedCharacteristic.writeValue(0);
+    targetRotationCharacteristic.writeValue(0);
 
     // start advertising
     BLE.advertise();
@@ -124,16 +117,37 @@ void Balancebot::setupBluetooth()
     Serial << " done!" << '\n';
 }
 
-void Balancebot::loop(unsigned long dt, unsigned long currentTime)
+void Balancebot::setupOdrive()
 {
-    loopBluetooth(dt, currentTime, loopIndex);
-    loopRobot(dt, currentTime, loopIndex);
+    Serial << "Setting up odrive..";
+
+    // setup odrive serial
+    // odriveSerial.begin(115200);
+
+    // using non-standard baudrate!
+    // odrv0.config.uart_baudrate = 921600
+    odriveSerial.begin(921600);
+
+    // clear odrive errors
+    odriveSerial << "sc\n";
+
+    // TODO: configure axes
+
+    Serial << " done!" << '\n';
+}
+
+void Balancebot::loop(unsigned long dt, unsigned long currentTimeUs)
+{
+    loopBluetooth(dt, currentTimeUs, loopIndex);
+    loopRobot(dt, currentTimeUs, loopIndex);
 
     loopIndex++;
 }
 
-void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTime, int loopIndex)
+void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, int loopIndex)
 {
+    unsigned long startTimeUs = micros();
+
     bool isBluetoothConnected = BLE.connected();
 
     // check for change of bluetooth connection state
@@ -172,43 +186,73 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTime, int 
             Serial << "Got new target speed of " << targetSpeed << '\n';
         }
 
+        // handle target rotation updates
+        if (targetRotationCharacteristic.written())
+        {
+            targetRotation = targetRotationCharacteristic.value();
+
+            targetRotationCharacteristic.writeValue(targetRotation);
+
+            Serial << "Got new target rotation of " << targetRotation << '\n';
+        }
+
         // calculate time since last reported angle via ble
-        unsigned long timeSinceReportedAngle = currentTime - lastAngleReportedTime;
+        unsigned long timeSinceReportedAngleUs = currentTimeUs - lastAngleReportedTimeUs;
 
         // report robot angle at certain interval
-        if (timeSinceReportedAngle > REPORT_ANGLE_INTERVAL_MS)
+        if (timeSinceReportedAngleUs > REPORT_ANGLE_INTERVAL_US)
         {
             angleCharacteristic.writeValue(angle);
 
             // Serial << "Reported angle of " << angle << " degrees\n";
 
-            lastAngleReportedTime = currentTime;
+            lastAngleReportedTimeUs = currentTimeUs;
         }
+    }
+
+    unsigned long timeTakenUs = micros() - startTimeUs;
+
+    // if (loopIndex % 100 == 0 || timeTakenUs > 10000)
+    if (timeTakenUs > 10000)
+    {
+        Serial << "Slow update of bluetooth took " << timeTakenUs << "us\n";
     }
 }
 
-void Balancebot::loopRobot(unsigned long dt, unsigned long currentTime, int loopIndex)
+void Balancebot::loopRobot(unsigned long dt, unsigned long currentTimeUs, int loopIndex)
 {
+    unsigned long startTimeUs = micros();
+
     // handle states
     switch (state)
     {
     case BalancebotState::Balancing:
-        loopRobotBalacing(dt, currentTime, loopIndex);
+        loopRobotBalacing(dt, currentTimeUs, loopIndex);
         break;
 
     default:
         // ignore other states
         break;
     }
+
+    unsigned long timeTakenUs = micros() - startTimeUs;
+
+    // if (loopIndex % 100 == 0 || timeTakenUs > 10000)
+    if (timeTakenUs > 10000)
+    {
+        Serial << "Slow update of robot took " << timeTakenUs << "us\n";
+    }
 }
 
-void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTime, int loopIndex)
+void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs, int loopIndex)
 {
     // TODO: get target distance from remote controller
     double targetDistance = 0.0;
 
+    // TODO: getting odometry is slow..
     // get robot position and averageDistance travelled from encoders
-    BalancebotOdometry odometry = getOdometry();
+    // BalancebotOdometry odometry = getOdometry();
+    BalancebotOdometry odometry = BalancebotOdometry(0.0f, 0.0f);
 
     // calculate position holding PID controller
     positionPidInput = -odometry.averageDistance;
@@ -218,7 +262,7 @@ void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTime, 
 
     // don't use position hold at the beginning
     // would require storing target offset at first position hold
-    // if (currentTime < 30) {
+    // if (currentTimeUs < 30) {
     //     positionPidTargetAngle = 0.0;
     // }
 
@@ -241,7 +285,7 @@ void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTime, 
     double targetVelocity = anglePidOutput;
 
     // stop motors if angle gets too big
-    if (abs(angle) > 20.0f)
+    if (abs(angle) > 30.0f)
     {
         targetVelocity = 0.0f;
     }
@@ -249,12 +293,16 @@ void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTime, 
     // TODO: implement steering
 
     // set motor velocities
-    setMotorVelocities(targetVelocity, targetVelocity);
+    double rotationVelocity = (double)targetRotation * 0.1;
+    double targetLeftVelocity = targetVelocity + rotationVelocity;
+    double targetRightVelocity = targetVelocity - rotationVelocity;
+
+    setMotorVelocities(targetLeftVelocity, targetRightVelocity);
 
     // Serial << "Setpoint: " << anglePidSetpoint << ", real: " << angle << ", dt: " << dt << '\n';
 
     // log for serial plotter
-    // Serial << (currentTime / 1000.0f) << '\t' << angle << '\t' << anglePidSetpoint << '\t' << targetVelocity << '\t' << odometry.leftDistance << '\t' << odometry.rightDistance << '\t' << odometry.averageDistance << '\t' << dt << '\n';
+    // Serial << (currentTimeUs / 1000.0f) << '\t' << angle << '\t' << anglePidSetpoint << '\t' << targetVelocity << '\t' << odometry.leftDistance << '\t' << odometry.rightDistance << '\t' << odometry.averageDistance << '\t' << dt << '\n';
 }
 
 void Balancebot::setState(BalancebotState newState)
@@ -325,10 +373,28 @@ String Balancebot::getStateName(BalancebotState state)
 BalancebotOdometry Balancebot::getOdometry()
 {
     // get motor position estimates
-    odriveSerial << "r axis" << 0 << ".encoder.pos_estimate << \n";
+    // odriveSerial << "r axis" << 0 << ".encoder.pos_estimate << \n";
+    // float rightDistance = odrive.readFloat();
+    // odriveSerial << "r axis" << 1 << ".encoder.pos_estimate << \n";
+    // float leftDistance = odrive.readFloat() * -1;
+
+    // TODO: any way to make this faster?
+    // get motor position estimates
+    odriveSerial << "r axis0.encoder.pos_estimate\n";
     float rightDistance = odrive.readFloat();
-    odriveSerial << "r axis" << 1 << ".encoder.pos_estimate << \n";
+    odriveSerial << "r axis1.encoder.pos_estimate\n";
     float leftDistance = odrive.readFloat() * -1;
+
+    // get motor position estimates
+    // odriveSerial << "f 0\n";
+    // String r = odrive.readString();
+    // Serial << "feedback: " << r << '\n';
+
+    // float rightDistance = odrive.readFloat();
+    // float rightVelocity = odrive.readFloat();
+    // odriveSerial << "f 1\n";
+    // float leftDistance = odrive.readFloat() * -1;
+    // float leftVelocity = odrive.readFloat() * -1;
 
     // TODO: calculate real distances using wheel diameter
     return BalancebotOdometry(leftDistance, rightDistance);

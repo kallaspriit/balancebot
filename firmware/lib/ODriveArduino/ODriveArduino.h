@@ -5,9 +5,10 @@
 #include "Arduino.h"
 #include "ODriveEnums.h"
 
-class ODriveArduino {
+class ODriveArduino
+{
 public:
-    ODriveArduino(Stream& serial);
+    ODriveArduino(Stream &serial);
 
     // Commands
     void SetPosition(int motor_number, float position);
@@ -26,10 +27,10 @@ public:
 
     // State helper
     bool run_state(int axis, int requested_state, bool wait_for_idle, float timeout = 10.0f);
-private:
     String readString();
 
-    Stream& serial_;
+private:
+    Stream &serial_;
 };
 
-#endif //ODriveArduino_h
+#endif // ODriveArduino_h

@@ -48,19 +48,19 @@ public:
     ~Balancebot();
 
     void setup();
-    void loop(unsigned long dt, unsigned long currentTime);
+    void loop(unsigned long dt, unsigned long currentTimeUs);
 
 private:
     void setupPins();
     void setupMpu();
-    void setupOdrive();
     void setupBluetooth();
+    void setupOdrive();
 
     void onEnterBalacingState();
 
-    void loopBluetooth(unsigned long dt, unsigned long currentTime, int loopIndex);
-    void loopRobot(unsigned long dt, unsigned long currentTime, int loopIndex);
-    void loopRobotBalacing(unsigned long dt, unsigned long currentTime, int loopIndex);
+    void loopBluetooth(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
+    void loopRobot(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
+    void loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
 
     String getStateName(BalancebotState state);
     BalancebotOdometry getOdometry();
@@ -82,6 +82,7 @@ private:
     BLEService controlService;
     BLEFloatCharacteristic angleCharacteristic;
     BLEIntCharacteristic targetSpeedCharacteristic;
+    BLEIntCharacteristic targetRotationCharacteristic;
 
     // configuration
     BalancebotConfig config;
@@ -91,6 +92,7 @@ private:
     String error = "";
     float angle = 0.0f;
     int targetSpeed = 0;
+    int targetRotation = 0;
     bool wasBluetoothConnected = false;
 
     // angle pid controller
@@ -105,10 +107,10 @@ private:
 
     // timing
     int loopIndex = 0;
-    unsigned long lastAngleReportedTime = 0;
+    unsigned long lastAngleReportedTimeUs = 0;
 
     // constants
-    unsigned long REPORT_ANGLE_INTERVAL_MS = 100;
+    unsigned long REPORT_ANGLE_INTERVAL_US = 100 * 1000;
 };
 
 #endif // BALANCEBOT_HPP
