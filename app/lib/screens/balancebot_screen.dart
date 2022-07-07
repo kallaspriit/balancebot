@@ -9,8 +9,9 @@ import 'package:provider/provider.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:flutter_joystick/flutter_joystick.dart';
 
+import '../services/build_characteristic_bool.dart';
 import '../services/build_characteristic_int32.dart';
-import '../services/parse_characteristic_int32.dart';
+import '../services/parse_characteristic_bool.dart';
 import '../src/ble/ble_device_connector.dart';
 import '../src/ble/ble_device_interactor.dart';
 import '../src/ble/ble_scanner.dart';
@@ -100,12 +101,16 @@ class Balancebot extends HookWidget {
   static final angleCharacteristicUuid = Uuid.parse("19B10001-E8F2-537E-4F6C-D104768A1214");
   static final targetSpeedCharacteristicUuid = Uuid.parse("40760001-8912-48af-9146-b057c465d970");
   static final targetRotationCharacteristicUuid = Uuid.parse("40760002-8912-48af-9146-b057c465d970");
+  static final usePositionHoldCharacteristicUuid = Uuid.parse("40760003-8912-48af-9146-b057c465d970");
+  static final isEnabledCharacteristicUuid = Uuid.parse("40760004-8912-48af-9146-b057c465d970");
 
   // map of known characteristic names
   static final characteristicNames = {
     angleCharacteristicUuid: "Angle",
     targetSpeedCharacteristicUuid: "Target speed",
     targetRotationCharacteristicUuid: "Target rotation",
+    usePositionHoldCharacteristicUuid: "Use position hold",
+    isEnabledCharacteristicUuid: "Is enabled",
   };
 
   final DiscoveredDevice device;
@@ -193,9 +198,9 @@ class Balancebot extends HookWidget {
             // subscribe and update characteristic values
             final characteristicSubscription =
                 bleDeviceInteractor.subScribeToCharacteristic(characteristic).listen((value) {
-              debugPrint(
-                "Got ${getCharacteristicName(characteristic.characteristicId)} update: ${value.join(",")}",
-              );
+              // debugPrint(
+              //   "Got ${getCharacteristicName(characteristic.characteristicId)} update: ${value.join(",")}",
+              // );
 
               characteristicValues.value[characteristic.characteristicId] = value;
               characteristicValues.notifyListeners();
@@ -256,6 +261,32 @@ class Balancebot extends HookWidget {
       bleDeviceInteractor.writeCharacterisiticWithoutResponse(characteristic, buildCharacteristicInt32(rotation));
     }, []);
 
+    // sets use position hold characteristic
+    final setUsePositionHold = useCallback((bool enabled) {
+      debugPrint("Setting position hold: ${enabled ? "enabled" : "disabled"}");
+
+      final characteristic = QualifiedCharacteristic(
+        deviceId: device.id,
+        serviceId: controlServiceUuid,
+        characteristicId: usePositionHoldCharacteristicUuid,
+      );
+
+      bleDeviceInteractor.writeCharacterisiticWithoutResponse(characteristic, buildCharacteristicBool(enabled));
+    }, []);
+
+    // sets robot enabled characteristic
+    final setIsEnabled = useCallback((bool enabled) {
+      debugPrint("Setting robot state: ${enabled ? "enabled" : "disabled"}");
+
+      final characteristic = QualifiedCharacteristic(
+        deviceId: device.id,
+        serviceId: controlServiceUuid,
+        characteristicId: isEnabledCharacteristicUuid,
+      );
+
+      bleDeviceInteractor.writeCharacterisiticWithoutResponse(characteristic, buildCharacteristicBool(enabled));
+    }, []);
+
     // apply target speed
     useEffect(() {
       setTargetSpeed(speedInput.value);
@@ -270,20 +301,25 @@ class Balancebot extends HookWidget {
       return () {};
     }, [rotationInput.value]);
 
-    final balancebotStatusService =
+    // detect robot
+    final robotStatusService =
         discoveredServices.value.firstWhereOrNull((service) => service.serviceId == statusServiceUuid);
-    final isBalancebot = balancebotStatusService != null;
+    final isRobot = robotStatusService != null;
 
-    if (!isBalancebot) {
-      return const ErrorScreen(error: "Given BLE device does not appear to be Balancebot");
+    // handle robot not detected
+    if (!isRobot) {
+      return const ErrorScreen(error: "Given BLE device does not appear to be valid");
     }
 
     // get characteristic values
     final angle = parseCharacteristicFloat(characteristicValues.value[angleCharacteristicUuid] ?? [0, 0, 0, 0]);
-    final targetSpeed =
-        parseCharacteristicInt32(characteristicValues.value[targetSpeedCharacteristicUuid] ?? [0, 0, 0, 0]);
-    final targetRotation =
-        parseCharacteristicInt32(characteristicValues.value[targetRotationCharacteristicUuid] ?? [0, 0, 0, 0]);
+    // final targetSpeed =
+    //     parseCharacteristicInt32(characteristicValues.value[targetSpeedCharacteristicUuid] ?? [0, 0, 0, 0]);
+    // final targetRotation =
+    //     parseCharacteristicInt32(characteristicValues.value[targetRotationCharacteristicUuid] ?? [0, 0, 0, 0]);
+    final usePositionHold =
+        parseCharacteristicBool(characteristicValues.value[usePositionHoldCharacteristicUuid] ?? [0]);
+    final isEnabled = parseCharacteristicBool(characteristicValues.value[isEnabledCharacteristicUuid] ?? [0]);
 
     // render device details
     return Column(
@@ -296,16 +332,40 @@ class Balancebot extends HookWidget {
                 subtitle: Text("${angle.toStringAsFixed(2)} degrees"),
               ),
             ),
+            // Expanded(
+            //   child: ListTile(
+            //     title: const Text("Target speed"),
+            //     subtitle: Text(targetSpeed.toString()),
+            //   ),
+            // ),
+            // Expanded(
+            //   child: ListTile(
+            //     title: const Text("Target rotation"),
+            //     subtitle: Text(targetRotation.toString()),
+            //   ),
+            // ),
             Expanded(
               child: ListTile(
-                title: const Text("Target speed"),
-                subtitle: Text(targetSpeed.toString()),
+                title: const Text("Enabled"),
+                subtitle: Align(
+                  alignment: Alignment.topLeft,
+                  child: Switch(
+                    value: isEnabled,
+                    onChanged: (enabled) => setIsEnabled(enabled),
+                  ),
+                ),
               ),
             ),
             Expanded(
               child: ListTile(
-                title: const Text("Target rotation"),
-                subtitle: Text(targetRotation.toString()),
+                title: const Text("Use position hold"),
+                subtitle: Align(
+                  alignment: Alignment.topLeft,
+                  child: Switch(
+                    value: usePositionHold,
+                    onChanged: (enabled) => setUsePositionHold(enabled),
+                  ),
+                ),
               ),
             ),
           ],

@@ -10,9 +10,9 @@
 
 enum BalancebotState
 {
-    Initializing = 0,
-    Error = 1,
-    Balancing = 2,
+    Initializing,
+    Error,
+    Balancing
 };
 
 class BalancebotConfig
@@ -57,18 +57,18 @@ private:
     void setupOdrive();
 
     void onEnterBalacingState();
-
+    //
     void loopBluetooth(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
     void loopRobot(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
     void loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
 
     String getStateName(BalancebotState state);
     BalancebotOdometry getOdometry();
-
     void setMotorVelocities(float velocityLeft, float velocityRight);
-
     void setState(BalancebotState newState);
     void setError(String error);
+    void reportAllState();
+    void updatePositionHoldStartPosition();
 
     // dependencies
     HardwareSerial &odriveSerial;
@@ -83,6 +83,8 @@ private:
     BLEFloatCharacteristic angleCharacteristic;
     BLEIntCharacteristic targetSpeedCharacteristic;
     BLEIntCharacteristic targetRotationCharacteristic;
+    BLEBoolCharacteristic usePositionHoldCharacteristic;
+    BLEBoolCharacteristic isEnabledCharacteristic;
 
     // configuration
     BalancebotConfig config;
@@ -90,10 +92,18 @@ private:
     // runtime state
     BalancebotState state = BalancebotState::Initializing;
     String error = "";
+    bool wasBluetoothConnected = false;
     float angle = 0.0f;
+    float positionHoldStartPosition = 0.0f;
+    float targetDistance = 0.0f;
+    // TODO: make configurable via characteristic?
+    float idleTargetAngle = 0.0;
+
+    // remote control state
     int targetSpeed = 0;
     int targetRotation = 0;
-    bool wasBluetoothConnected = false;
+    bool usePositionHold = false;
+    bool isEnabled = true;
 
     // angle pid controller
     double anglePidSetpoint = 0.0;
@@ -108,9 +118,12 @@ private:
     // timing
     int loopIndex = 0;
     unsigned long lastAngleReportedTimeUs = 0;
+    unsigned long lastRobotFallenOverTimeUs = 0;
 
     // constants
-    unsigned long REPORT_ANGLE_INTERVAL_US = 100 * 1000;
+    static const unsigned long REPORT_ANGLE_INTERVAL_US = 100 * 1000;
+    static const unsigned long ROBOT_FALLEN_OVER_RECENTLY_TIME_US = 1000 * 1000;
+    static constexpr float SPEED_DISTANCE_MULTIPLIER = 2.0f;
 };
 
 #endif // BALANCEBOT_HPP
