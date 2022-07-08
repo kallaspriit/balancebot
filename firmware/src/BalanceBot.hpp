@@ -33,12 +33,19 @@ public:
 class BalancebotOdometry
 {
 public:
-    BalancebotOdometry(float leftDistance, float rightDistance)
-        : leftDistance(leftDistance), rightDistance(rightDistance), averageDistance((leftDistance + rightDistance) / 2.0f) {}
+    BalancebotOdometry(float leftPosition, float rightPosition)
+        : leftPosition(leftPosition), rightPosition(rightPosition), position((leftPosition + rightPosition) / 2.0f) {}
 
-    float leftDistance;
-    float rightDistance;
-    float averageDistance;
+    void update(float newLeftPosition, float newRightPosition)
+    {
+        leftPosition = newLeftPosition;
+        rightPosition = newRightPosition;
+        position = (leftPosition + rightPosition) / 2.0f;
+    }
+
+    float leftPosition;
+    float rightPosition;
+    float position;
 };
 
 class Balancebot
@@ -91,13 +98,18 @@ private:
 
     // runtime state
     BalancebotState state = BalancebotState::Initializing;
+    // BalancebotOdometry odometry;
     String error = "";
     bool wasBluetoothConnected = false;
+    bool wasRobotFallenOver = false;
     float angle = 0.0f;
     float positionHoldStartPosition = 0.0f;
-    float targetDistance = 0.0f;
+    float lastPosition = 0.0f;
+    float targetPosition = 0.0f;
     // TODO: make configurable via characteristic?
     float idleTargetAngle = 0.0;
+    float motorVelocityLeft = 0.0f;
+    float motorVelocityRight = 0.0f;
 
     // remote control state
     int targetSpeed = 0;
@@ -123,7 +135,9 @@ private:
     // constants
     static const unsigned long REPORT_ANGLE_INTERVAL_US = 100 * 1000;
     static const unsigned long ROBOT_FALLEN_OVER_RECENTLY_TIME_US = 1000 * 1000;
+    static const unsigned long US_IN_SECOND = 1000 * 1000;
     static constexpr float SPEED_DISTANCE_MULTIPLIER = 2.0f;
+    static constexpr float ROTATION_VELOCITY_MULTIPLIER = 0.2f;
 };
 
 #endif // BALANCEBOT_HPP

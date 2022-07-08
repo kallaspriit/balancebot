@@ -25,9 +25,9 @@ const double ANGLE_PID_D = 0.01;
 // const double POSITION_PID_P = 0.5;
 // const double POSITION_PID_I = 0.0;
 // const double POSITION_PID_D = 0.1;
-const double POSITION_PID_P = 0.5;
+const double POSITION_PID_P = 0.3;
 const double POSITION_PID_I = 0.0;
-const double POSITION_PID_D = 0.25;
+const double POSITION_PID_D = 0.2;
 
 // dependency instances
 BalancebotConfig config = BalancebotConfig(

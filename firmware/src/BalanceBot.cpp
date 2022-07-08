@@ -17,6 +17,7 @@ Balancebot::Balancebot(BalancebotConfig config)
       usePositionHoldCharacteristic("40760003-8912-48af-9146-b057c465d970", BLERead | BLENotify | BLEWriteWithoutResponse),
       isEnabledCharacteristic("40760004-8912-48af-9146-b057c465d970", BLERead | BLENotify | BLEWriteWithoutResponse),
       config(config)
+//   odometry(0.0f, 0.0f)
 {
     // TODO: configure pid parameters and make configurable from outside
     anglePid.SetMode(AUTOMATIC);
@@ -127,8 +128,8 @@ void Balancebot::setupOdrive()
     // odriveSerial.begin(115200);
 
     // using non-standard baudrate!
-    // odrv0.config.uart_baudrate = 230400
-    odriveSerial.begin(230400);
+    // odrv0.config.uart_baudrate = 256000
+    odriveSerial.begin(256000);
 
     // too fast, getting errors
     // odrv0.config.uart_baudrate = 921600
@@ -170,7 +171,7 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
         {
             targetSpeed = 0;
             targetRotation = 0;
-            targetDistance = 0.0f;
+            targetPosition = 0.0f;
             usePositionHold = true;
 
             reportAllState();
@@ -188,12 +189,11 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
     // increment target distance in position hold mode
     if (usePositionHold)
     {
-        // targetDistance += (float)targetSpeed * Balancebot::SPEED_DISTANCE_MULTIPLIER * ((float)dt / 1000000.0f);
-        targetDistance = lastPosition + (float)targetSpeed * 1.0f;
+        targetPosition += (float)targetSpeed * Balancebot::SPEED_DISTANCE_MULTIPLIER * ((float)dt / 1000000.0f);
     }
     else
     {
-        targetDistance = 0.0f;
+        targetPosition = 0.0f;
     }
 
     // poll bluetooth for updates
@@ -214,6 +214,14 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
             targetSpeedCharacteristic.writeValue(targetSpeed);
 
             Serial << "Got new target speed of " << targetSpeed << '\n';
+
+            // make the robot stop at the place zero speed was requested
+            if (targetSpeed == 0 && usePositionHold)
+            {
+                targetPosition = lastPosition - positionHoldStartPosition;
+
+                Serial << "Stopping requested, updating target position to " << targetPosition << '\n';
+            }
         }
 
         // handle target rotation updates
@@ -242,7 +250,7 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
             }
 
             // reset target distance
-            targetDistance = 0.0f;
+            targetPosition = 0.0f;
         }
 
         // handle is enabled updates
@@ -255,7 +263,7 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
             Serial << "Robot is now " << (isEnabled ? "enabled" : "disabled") << '\n';
 
             // reset target distance
-            targetDistance = 0.0f;
+            targetPosition = 0.0f;
 
             if (isEnabled && usePositionHold)
             {
@@ -311,15 +319,16 @@ void Balancebot::loopRobot(unsigned long dt, unsigned long currentTimeUs, int lo
 
 void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs, int loopIndex)
 {
-    // TODO: getting odometry is slow..
+    // TODO: getting odometry is slow.. calculate from requested velocities?
     // only fetch odometry data if position hold is enabled
     BalancebotOdometry odometry = usePositionHold ? getOdometry() : BalancebotOdometry(0.0f, 0.0f);
 
-    lastPosition = odometry.averageDistance;
+    // store last position
+    lastPosition = odometry.position;
 
     // calculate position holding PID controller
-    positionPidInput = odometry.averageDistance;
-    positionPidSetpoint = positionHoldStartPosition + targetDistance;
+    positionPidInput = odometry.position;
+    positionPidSetpoint = positionHoldStartPosition + targetPosition;
     positionPid.Compute();
 
     // update the inertial measurement unit
@@ -339,7 +348,7 @@ void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs
 
     // calculate motor velocities applying turning rotation
     double targetVelocity = anglePidOutput;
-    double rotationVelocity = (double)targetRotation * 0.1;
+    double rotationVelocity = targetRotation * Balancebot::ROTATION_VELOCITY_MULTIPLIER;
     double targetLeftVelocity = targetVelocity + rotationVelocity;
     double targetRightVelocity = targetVelocity - rotationVelocity;
 
@@ -360,17 +369,39 @@ void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs
         targetRightVelocity = 0.0f;
     }
 
+    // reset target position and position hold start position if robot just fell over
+    if (hasRobotFallenOver && !wasRobotFallenOver)
+    {
+        targetPosition = 0.0f;
+        updatePositionHoldStartPosition();
+
+        Serial << "Robot has fallen over\n";
+    }
+    else if (!hasRobotFallenOver && wasRobotFallenOver)
+    {
+        Serial << "Robot got back up\n";
+    }
+
     setMotorVelocities(targetLeftVelocity, targetRightVelocity);
 
+    // update fallen over state
+    wasRobotFallenOver = hasRobotFallenOver;
+
+    // TODO: this is not really accurate enough
+    // update the fake odometry based on last requested velocities
+    // odometry.leftPosition += motorVelocityLeft * ((float)dt / (float)Balancebot::US_IN_SECOND);
+    // odometry.rightPosition += motorVelocityRight * ((float)dt / (float)Balancebot::US_IN_SECOND);
+    // odometry.position = (odometry.leftPosition + odometry.rightPosition) / 2.0f;
+
     // log for serial plotter
-    // Serial << (currentTimeUs / 1000.0f) << '\t' << angle << '\t' << anglePidSetpoint << '\t' << targetVelocity << '\t' << odometry.leftDistance << '\t' << odometry.rightDistance << '\t' << odometry.averageDistance << '\t' << dt << '\n';
+    // Serial << (currentTimeUs / 1000.0f) << '\t' << angle << '\t' << anglePidSetpoint << '\t' << targetVelocity << '\t' << odometry.leftPosition << '\t' << odometry.rightPosition << '\t' << odometry.position << '\t' << dt << '\n';
 
     // log at interval
     // if (loopIndex % 100 == 0)
     // {
-    //     // Serial << "Odometry: " << odometry.leftDistance << ", " << odometry.rightDistance << " - " << odometry.averageDistance << ", dt: " << dt << '\n';
+    //     Serial << "Odometry: " << odometry.leftPosition << ", " << odometry.rightPosition << " - " << odometry.position << ", dt: " << dt << '\n';
     //     // Serial << "Setpoint: " << anglePidSetpoint << ", real: " << angle << ", dt: " << dt << '\n';
-    //     Serial << "Angle setpoint: " << anglePidSetpoint << ", target distance: " << positionPidSetpoint << ", real distance: " << odometry.averageDistance << '\n';
+    //     // Serial << "Angle setpoint: " << anglePidSetpoint << ", target distance: " << positionPidSetpoint << ", real distance: " << odometry.position << '\n';
     // }
 }
 
@@ -420,7 +451,7 @@ void Balancebot::updatePositionHoldStartPosition()
 {
     BalancebotOdometry odometry = getOdometry();
 
-    positionHoldStartPosition = odometry.averageDistance;
+    positionHoldStartPosition = odometry.position;
 
     // TODO: how to reset pid controller, do we need to?
     // positionPid.Reset();
@@ -440,6 +471,10 @@ void Balancebot::setMotorVelocities(float velocityLeft, float velocityRight)
     // M0 is right, M1 is left and inverted
     odrive.SetVelocity(0, velocityRight);
     odrive.SetVelocity(1, -velocityLeft);
+
+    // update current requested motor velocities
+    motorVelocityLeft = velocityLeft;
+    motorVelocityRight = velocityRight;
 }
 
 String Balancebot::getStateName(BalancebotState state)
@@ -462,36 +497,28 @@ String Balancebot::getStateName(BalancebotState state)
 
 BalancebotOdometry Balancebot::getOdometry()
 {
-    // get motor position estimates
-    // odriveSerial << "r axis" << 0 << ".encoder.pos_estimate << \n";
-    // float rightDistance = odrive.readFloat();
-    // odriveSerial << "r axis" << 1 << ".encoder.pos_estimate << \n";
-    // float leftDistance = odrive.readFloat() * -1;
-
     // TODO: any way to make this faster?
     // get motor position estimates
-    odriveSerial << "r axis0.encoder.pos_estimate\n";
-    float rightDistance = odrive.readFloat() * -1;
-    odriveSerial << "r axis1.encoder.pos_estimate\n";
-    float leftDistance = odrive.readFloat();
+    // odriveSerial << "r axis0.encoder.pos_estimate\n";
+    // float rightPosition = odrive.readFloat() * -1.0f;
+    // odriveSerial << "r axis1.encoder.pos_estimate\n";
+    // float leftPosition = odrive.readFloat();
 
     // get motor position estimates
-    // odriveSerial << "f 0\n";
-    // String r = odrive.readString();
-    // Serial << "feedback: " << r << '\n';
+    odriveSerial << "f 0\n";
+    float rightPosition = odrive.readFloat() * -1.0f;
+    odriveSerial << "f 1\n";
+    float leftPosition = odrive.readFloat();
 
-    // float rightDistance = odrive.readFloat();
-    // float rightVelocity = odrive.readFloat();
-    // odriveSerial << "f 1\n";
-    // float leftDistance = odrive.readFloat() * -1;
-    // float leftVelocity = odrive.readFloat() * -1;
+    // Serial << "feedback: " << r << '\n';
+    // TODO: extract position and velocity from string "0.0 0.0" etc
 
     // detect abnormal odometry readings (big difference from last reading)
-    // if (abs(odometry.averageDistance) > 0.1f && (abs(odometry.leftDistance - leftDistance) > 1000 || abs(odometry.rightDistance - rightDistance) > 1000))
+    // if (abs(odometry.position) > 0.1f && (abs(odometry.leftPosition - leftPosition) > 1000 || abs(odometry.rightPosition - rightPosition) > 1000))
     // {
-    //     Serial << "Got abnormal odometry: " << leftDistance << ", " << rightDistance << " (previously " << odometry.leftDistance << ", " << odometry.rightDistance << ")" << '\n';
+    //     Serial << "Got abnormal odometry: " << leftPosition << ", " << rightPosition << " (previously " << odometry.leftPosition << ", " << odometry.rightPosition << ")" << '\n';
     // }
 
     // TODO: calculate real distances using wheel diameter
-    return BalancebotOdometry(leftDistance, rightDistance);
+    return BalancebotOdometry(leftPosition, rightPosition);
 }
