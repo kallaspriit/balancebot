@@ -158,6 +158,12 @@ void Balancebot::loop(unsigned long dt, unsigned long currentTimeUs)
 
 void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, int loopIndex)
 {
+    // skip bluetooth if rc receiver is connected
+    if (isReceiverConnected)
+    {
+        return;
+    }
+
     unsigned long startTimeUs = micros();
 
     bool isBluetoothConnected = BLE.connected();
@@ -387,19 +393,19 @@ void Balancebot::loopReceiver(unsigned long dt, unsigned long currentTimeUs, int
 
             // Serial << "RX speed: " << targetSpeed << ", rotation: " << targetRotation << '\n';
 
-            wasReceiverConnected = true;
+            isReceiverConnected = true;
         }
         else
         {
             // stop the robot if receiver was connected but is not any more
-            if (wasReceiverConnected)
+            if (isReceiverConnected)
             {
                 Serial << "Receiver connection lost, stopping robot\n";
 
                 targetSpeed = 0;
                 targetRotation = 0;
                 usePositionHold = true;
-                wasReceiverConnected = false;
+                isReceiverConnected = false;
 
                 updatePositionHoldStartPosition();
             }

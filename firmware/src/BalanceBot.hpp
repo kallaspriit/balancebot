@@ -107,7 +107,7 @@ private:
     // BalancebotOdometry odometry;
     String error = "";
     bool wasBluetoothConnected = false;
-    bool wasReceiverConnected = false;
+    bool isReceiverConnected = false;
     bool wasRobotFallenOver = false;
     float angle = 0.0f;
     float positionHoldStartPosition = 0.0f;
