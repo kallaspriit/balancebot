@@ -9,6 +9,7 @@
 #include <ArduinoBLE.h>
 #include <sbus.h>
 
+// possible robot states
 enum BalancebotState
 {
     Initializing,
@@ -16,6 +17,7 @@ enum BalancebotState
     Balancing
 };
 
+// robot configuration
 class BalancebotConfig
 {
 public:
@@ -31,6 +33,7 @@ public:
     double positionPidD;
 };
 
+// represents odometry from the wheel encoders
 class BalancebotOdometry
 {
 public:
@@ -49,11 +52,11 @@ public:
     float position;
 };
 
+// main robot class
 class Balancebot
 {
 public:
     Balancebot(BalancebotConfig config);
-    ~Balancebot();
 
     void setup();
     void loop(unsigned long dt, unsigned long currentTimeUs);
@@ -72,8 +75,6 @@ private:
     void loopRobot(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
     void loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
 
-    String getStateName(BalancebotState state);
-    BalancebotOdometry getOdometry();
     void setMotorVelocities(float velocityLeft, float velocityRight);
     void setState(BalancebotState newState);
     void setError(String error);
@@ -81,7 +82,11 @@ private:
     void updatePositionHoldStartPosition();
     void calibrateImu();
 
+    String getStateName(BalancebotState state);
+    BalancebotOdometry getOdometry();
+
     // dependencies
+    BalancebotConfig config;
     HardwareSerial &odriveSerial;
     ODriveArduino odrive;
     MPU6050 mpu;
@@ -99,12 +104,8 @@ private:
     BLEBoolCharacteristic usePositionHoldCharacteristic;
     BLEBoolCharacteristic isEnabledCharacteristic;
 
-    // configuration
-    BalancebotConfig config;
-
     // runtime state
     BalancebotState state = BalancebotState::Initializing;
-    // BalancebotOdometry odometry;
     String error = "";
     bool wasBluetoothConnected = false;
     bool isReceiverConnected = false;
@@ -113,7 +114,6 @@ private:
     float positionHoldStartPosition = 0.0f;
     float lastPosition = 0.0f;
     float targetPosition = 0.0f;
-    // TODO: make configurable via characteristic?
     float idleTargetAngle = 0.0;
     float motorVelocityLeft = 0.0f;
     float motorVelocityRight = 0.0f;
