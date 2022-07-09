@@ -9,6 +9,8 @@ Balancebot::Balancebot(BalancebotConfig config)
       mpu(Wire),
       anglePid(PID(&anglePidInput, &anglePidOutput, &anglePidSetpoint, config.anglePidP, config.anglePidI, config.anglePidD, DIRECT)),
       positionPid(PID(&positionPidInput, &positionPidOutput, &positionPidSetpoint, config.positionPidP, config.positionPidI, config.positionPidD, DIRECT)),
+      rxSerial(digitalPinToPinName(Balancebot::PIN_RX_SERIAL_TX), digitalPinToPinName(Balancebot::PIN_RX_SERIAL_RX), NC, NC),
+      rx(&rxSerial),
       statusService("19B10000-E8F2-537E-4F6C-D104768A1214"),
       controlService("40760000-8912-48af-9146-b057c465d970"),
       angleCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify),
@@ -36,11 +38,15 @@ Balancebot::~Balancebot()
 
 void Balancebot::setup()
 {
+    // give some time to attach serial
+    delay(3000);
+
     // setup everything
     setupPins();
     setupMpu();
     setupBluetooth();
     setupOdrive();
+    setupReceiver();
 
     // go to balancing state
     setState(BalancebotState::Balancing);
@@ -70,13 +76,9 @@ void Balancebot::setupMpu()
 
     Serial << " done!" << '\n';
 
-    Serial << "Calculating IMU offsets, keep still.. ";
-
-    // calculate IMU offsets
-    delay(1000);
-    mpu.calcOffsets();
-
-    Serial << " done!" << '\n';
+    // TODO: implement storing offsets in eeprom
+    mpu.setGyroOffsets(-8.4281, -31.4373, -17.5373);
+    mpu.setAccOffsets(0.0255, -0.0104, -0.1493);
 }
 
 void Balancebot::setupBluetooth()
@@ -124,21 +126,23 @@ void Balancebot::setupOdrive()
 {
     Serial << "Setting up odrive..";
 
-    // setup odrive serial
-    // odriveSerial.begin(115200);
-
-    // using non-standard baudrate!
+    // setup odrive serial using non-standard baudrate!
     // odrv0.config.uart_baudrate = 256000
     odriveSerial.begin(256000);
-
-    // too fast, getting errors
-    // odrv0.config.uart_baudrate = 921600
-    // odriveSerial.begin(921600);
 
     // clear odrive errors
     odriveSerial << "sc\n";
 
-    // TODO: configure axes
+    // TODO: configure axes (currently using configuration stored on odrive)
+
+    Serial << " done!" << '\n';
+}
+
+void Balancebot::setupReceiver()
+{
+    Serial << "Setting up receiver..";
+
+    rx.Begin(1);
 
     Serial << " done!" << '\n';
 }
@@ -146,6 +150,7 @@ void Balancebot::setupOdrive()
 void Balancebot::loop(unsigned long dt, unsigned long currentTimeUs)
 {
     loopBluetooth(dt, currentTimeUs, loopIndex);
+    loopReceiver(dt, currentTimeUs, loopIndex);
     loopRobot(dt, currentTimeUs, loopIndex);
 
     loopIndex++;
@@ -186,16 +191,6 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
         return;
     }
 
-    // increment target distance in position hold mode
-    if (usePositionHold)
-    {
-        targetPosition += (float)targetSpeed * Balancebot::SPEED_DISTANCE_MULTIPLIER * ((float)dt / 1000000.0f);
-    }
-    else
-    {
-        targetPosition = 0.0f;
-    }
-
     // poll bluetooth for updates
     // BLE.poll();
 
@@ -213,15 +208,15 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
 
             targetSpeedCharacteristic.writeValue(targetSpeed);
 
-            Serial << "Got new target speed of " << targetSpeed << '\n';
+            Serial << "Target speed changed to " << targetSpeed << '\n';
 
             // make the robot stop at the place zero speed was requested
-            if (targetSpeed == 0 && usePositionHold)
-            {
-                targetPosition = lastPosition - positionHoldStartPosition;
+            // if (targetSpeed == 0 && usePositionHold)
+            // {
+            //     targetPosition = lastPosition - positionHoldStartPosition;
 
-                Serial << "Stopping requested, updating target position to " << targetPosition << '\n';
-            }
+            //     Serial << "Stopping requested, updating target position to " << targetPosition << '\n';
+            // }
         }
 
         // handle target rotation updates
@@ -231,7 +226,7 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
 
             targetRotationCharacteristic.writeValue(targetRotation);
 
-            Serial << "Got new target rotation of " << targetRotation << '\n';
+            Serial << "Target rotation changed to " << targetRotation << '\n';
         }
 
         // handle position hold updates
@@ -291,6 +286,126 @@ void Balancebot::loopBluetooth(unsigned long dt, unsigned long currentTimeUs, in
         Serial << "Slow update of bluetooth took " << timeTakenUs << "us\n";
     }
 }
+void Balancebot::loopReceiver(unsigned long dt, unsigned long currentTimeUs, int loopIndex)
+{
+    if (rx.Read())
+    {
+        // fetch receiver data
+        rxData = rx.ch();
+
+        if (useDebug)
+        {
+            Serial << "RX: ";
+
+            // display received data
+            for (int8_t i = 0; i < bfs::SbusRx::NUM_CH(); i++)
+            {
+                Serial << rxData[i] << '\t';
+            }
+
+            // display lost frames and failsafe data
+            Serial << rx.lost_frame() << '\t' << rx.failsafe() << '\n';
+        }
+
+        // extract remote data
+        if (!rx.failsafe())
+        {
+            bool wasUsingPositionHold = usePositionHold;
+            bool wasEnabled = isEnabled;
+            bool wasDebugEnabled = useDebug;
+            int lastTargetSpeed = targetSpeed;
+            int lastTargetRotation = targetRotation;
+
+            // TODO: implement speed scaling based on potentiometer on the remote
+            // targetSpeed = map(rxData[0], 172, 1811, -5, 5) * -1;
+            // targetRotation = map(rxData[1], 172, 1811, -10, 10);
+            targetSpeed = map(rxData[0], 172, 1811, -10, 10) * -1;
+            targetRotation = map(rxData[1], 172, 1811, -20, 20);
+            usePositionHold = rxData[8] > 500;
+            isEnabled = rxData[6] < 500;
+            useDebug = rxData[4] > 500;
+            bool performImuCalibration = rxData[7] > 500;
+
+            // detect target speed change
+            if (targetSpeed != lastTargetSpeed)
+            {
+                Serial << "Target speed changed to " << targetSpeed << '\n';
+
+                targetSpeedCharacteristic.writeValue(targetSpeed);
+            }
+
+            // detect target rotation change
+            if (targetRotation != lastTargetRotation)
+            {
+                Serial << "Target rotation changed to " << targetRotation << '\n';
+
+                targetRotationCharacteristic.writeValue(targetRotation);
+            }
+
+            // update position hold setpoint if it was just enabled
+            if (wasUsingPositionHold != usePositionHold)
+            {
+                Serial << "Position hold is now " << (usePositionHold ? "enabled" : "disabled") << '\n';
+
+                // update the initial position hold start position once enabled
+                if (usePositionHold)
+                {
+                    updatePositionHoldStartPosition();
+                }
+
+                // reset target distance
+                targetPosition = 0.0f;
+            }
+
+            // detect robot enabled state change
+            if (wasEnabled != isEnabled)
+            {
+                Serial << "Robot is now " << (isEnabled ? "enabled" : "disabled") << '\n';
+
+                // reset target distance
+                targetPosition = 0.0f;
+
+                if (isEnabled && usePositionHold)
+                {
+                    updatePositionHoldStartPosition();
+                }
+            }
+
+            // detect debug enabled state change
+            if (wasDebugEnabled != useDebug)
+            {
+                Serial << "Debug mode is now " << (useDebug ? "enabled" : "disabled") << '\n';
+            }
+
+            // calibrate imu if requested (throttled)
+            if (performImuCalibration && currentTimeUs - lastImuCalibrationTimeUs > IMU_CALIBRATION_THROTTLE_US)
+            {
+                lastImuCalibrationTimeUs = currentTimeUs;
+
+                calibrateImu();
+            }
+
+            // Serial << "RX speed: " << targetSpeed << ", rotation: " << targetRotation << '\n';
+
+            wasReceiverConnected = true;
+        }
+        else
+        {
+            // stop the robot if receiver was connected but is not any more
+            if (wasReceiverConnected)
+            {
+                Serial << "Receiver connection lost, stopping robot\n";
+
+                targetSpeed = 0;
+                targetRotation = 0;
+                usePositionHold = true;
+                wasReceiverConnected = false;
+
+                updatePositionHoldStartPosition();
+            }
+        }
+    }
+}
 
 void Balancebot::loopRobot(unsigned long dt, unsigned long currentTimeUs, int loopIndex)
 {
@@ -319,6 +434,16 @@ void Balancebot::loopRobot(unsigned long dt, unsigned long currentTimeUs, int lo
 
 void Balancebot::loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs, int loopIndex)
 {
+    // increment target distance in position hold mode
+    if (usePositionHold)
+    {
+        targetPosition += (float)targetSpeed * Balancebot::SPEED_DISTANCE_MULTIPLIER * ((float)dt / 1000000.0f);
+    }
+    else
+    {
+        targetPosition = 0.0f;
+    }
+
     // TODO: getting odometry is slow.. calculate from requested velocities?
     // only fetch odometry data if position hold is enabled
     BalancebotOdometry odometry = usePositionHold ? getOdometry() : BalancebotOdometry(0.0f, 0.0f);
@@ -457,6 +582,18 @@ void Balancebot::updatePositionHoldStartPosition()
     // positionPid.Reset();
 
     Serial << "Updated position hold start position to: " << positionHoldStartPosition << '\n';
+}
+
+void Balancebot::calibrateImu()
+{
+    Serial << "Calculating IMU offsets, keep upright and still..\n";
+
+    // calculate IMU offsets
+    mpu.calcOffsets();
+
+    Serial << "IMU calibrated:\n";
+    Serial << "mpu.setGyroOffsets(" << mpu.getGyroXoffset() << ", " << mpu.getGyroYoffset() << ", " << mpu.getGyroZoffset() << ");\n";
+    Serial << "mpu.setAccOffsets(" << mpu.getAccXoffset() << ", " << mpu.getAccYoffset() << ", " << mpu.getAccZoffset() << ");\n";
 }
 
 void Balancebot::onEnterBalacingState()

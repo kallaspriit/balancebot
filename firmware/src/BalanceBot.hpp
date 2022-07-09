@@ -7,6 +7,7 @@
 #include <PID_v1.h>
 #include <Wire.h>
 #include <ArduinoBLE.h>
+#include <sbus.h>
 
 enum BalancebotState
 {
@@ -62,10 +63,12 @@ private:
     void setupMpu();
     void setupBluetooth();
     void setupOdrive();
+    void setupReceiver();
 
     void onEnterBalacingState();
-    //
+
     void loopBluetooth(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
+    void loopReceiver(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
     void loopRobot(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
     void loopRobotBalacing(unsigned long dt, unsigned long currentTimeUs, int loopIndex);
 
@@ -76,6 +79,7 @@ private:
     void setError(String error);
     void reportAllState();
     void updatePositionHoldStartPosition();
+    void calibrateImu();
 
     // dependencies
     HardwareSerial &odriveSerial;
@@ -83,6 +87,8 @@ private:
     MPU6050 mpu;
     PID anglePid;
     PID positionPid;
+    UART rxSerial;
+    bfs::SbusRx rx;
 
     // bluetooth low energy controls
     BLEService statusService;
@@ -101,6 +107,7 @@ private:
     // BalancebotOdometry odometry;
     String error = "";
     bool wasBluetoothConnected = false;
+    bool wasReceiverConnected = false;
     bool wasRobotFallenOver = false;
     float angle = 0.0f;
     float positionHoldStartPosition = 0.0f;
@@ -110,12 +117,14 @@ private:
     float idleTargetAngle = 0.0;
     float motorVelocityLeft = 0.0f;
     float motorVelocityRight = 0.0f;
+    std::array<int16_t, bfs::SbusRx::NUM_CH()> rxData;
 
     // remote control state
     int targetSpeed = 0;
     int targetRotation = 0;
     bool usePositionHold = false;
     bool isEnabled = true;
+    bool useDebug = false;
 
     // angle pid controller
     double anglePidSetpoint = 0.0;
@@ -131,9 +140,13 @@ private:
     int loopIndex = 0;
     unsigned long lastAngleReportedTimeUs = 0;
     unsigned long lastRobotFallenOverTimeUs = 0;
+    unsigned long lastImuCalibrationTimeUs = 0;
 
     // constants
+    static const int PIN_RX_SERIAL_TX = 4;
+    static const int PIN_RX_SERIAL_RX = 3;
     static const unsigned long REPORT_ANGLE_INTERVAL_US = 100 * 1000;
+    static const unsigned long IMU_CALIBRATION_THROTTLE_US = 3000 * 1000;
     static const unsigned long ROBOT_FALLEN_OVER_RECENTLY_TIME_US = 1000 * 1000;
     static const unsigned long US_IN_SECOND = 1000 * 1000;
     static constexpr float SPEED_DISTANCE_MULTIPLIER = 2.0f;
